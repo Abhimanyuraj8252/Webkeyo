@@ -26,6 +26,8 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
     with SingleTickerProviderStateMixin {
   ProjectModel? _project;
   late TabController _tabController;
+  final TextEditingController _ttsApiKeyController = TextEditingController();
+  final TextEditingController _ttsBaseUrlController = TextEditingController();
 
   @override
   void initState() {
@@ -37,6 +39,8 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _ttsApiKeyController.dispose();
+    _ttsBaseUrlController.dispose();
     super.dispose();
   }
 
@@ -44,6 +48,10 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
     final registry = Provider.of<ProviderRegistry>(context, listen: false);
     setState(() {
       _project = registry.projectsBox.get(widget.projectId);
+      if (_project != null) {
+        _ttsApiKeyController.text = _project!.ttsApiKey ?? '';
+        _ttsBaseUrlController.text = _project!.ttsBaseUrl ?? '';
+      }
     });
   }
 
@@ -499,8 +507,46 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
             ],
           ).animate().fadeIn().slideY(begin: 0.05),
           const SizedBox(height: AppConstants.paddingLarge),
-          _buildModelSection(cs, 'TTS Provider', ProviderCategory.tts, p.ttsProviderId, p.ttsProviderId)
+          _buildModelSection(cs, 'TTS Provider', ProviderCategory.tts, p.ttsModelId, p.ttsProviderId)
               .animate().fadeIn(delay: 50.ms),
+          if (p.ttsProviderId != null && p.ttsProviderId != 'flutter_tts') ...[
+            const SizedBox(height: AppConstants.paddingLarge),
+            _SectionCard(
+              icon: Icons.vpn_key_outlined,
+              iconColor: Colors.amber,
+              title: 'TTS API Configuration',
+              subtitle: 'Settings for ${p.ttsProviderId}',
+              children: [
+                TextField(
+                  controller: _ttsApiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key',
+                    hintText: 'Enter your TTS API key',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.password),
+                  ),
+                  onChanged: (val) {
+                    p.ttsApiKey = val;
+                    p.save();
+                  },
+                ),
+                const SizedBox(height: AppConstants.paddingMedium),
+                TextField(
+                  controller: _ttsBaseUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom Base URL',
+                    hintText: 'Leave empty for default',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.link),
+                  ),
+                  onChanged: (val) {
+                    p.ttsBaseUrl = val;
+                    p.save();
+                  },
+                ),
+              ],
+            ).animate().fadeIn(delay: 100.ms),
+          ],
         ],
       ),
     );

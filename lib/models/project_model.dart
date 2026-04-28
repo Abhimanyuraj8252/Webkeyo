@@ -50,6 +50,10 @@ class ProjectModel extends HiveObject {
   List<String> editedImagePaths;
   @HiveField(23)
   String? ttsModelId;
+  @HiveField(24)
+  String? ttsApiKey;
+  @HiveField(25)
+  String? ttsBaseUrl;
 
   ProjectModel({
     required this.id,
@@ -76,6 +80,8 @@ class ProjectModel extends HiveObject {
     this.customExportPath,
     List<String>? editedImagePaths,
     this.ttsModelId,
+    this.ttsApiKey,
+    this.ttsBaseUrl,
   })  : extractedImagePaths = extractedImagePaths ?? [],
         editedImagePaths = editedImagePaths ?? [],
         createdAt = createdAt ?? DateTime.now();
@@ -151,6 +157,8 @@ class ProjectModel extends HiveObject {
     String? customExportPath,
     List<String>? editedImagePaths,
     String? ttsModelId,
+    String? ttsApiKey,
+    String? ttsBaseUrl,
   }) {
     return ProjectModel(
       id: id,
@@ -177,6 +185,8 @@ class ProjectModel extends HiveObject {
       customExportPath: customExportPath ?? this.customExportPath,
       editedImagePaths: editedImagePaths ?? this.editedImagePaths,
       ttsModelId: ttsModelId ?? this.ttsModelId,
+      ttsApiKey: ttsApiKey ?? this.ttsApiKey,
+      ttsBaseUrl: ttsBaseUrl ?? this.ttsBaseUrl,
     );
   }
 }
@@ -214,6 +224,8 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
     String? customExportPath;
     List<String> editedImagePaths = [];
     String? ttsModelId;
+    String? ttsApiKey;
+    String? ttsBaseUrl;
 
     try {
       if (reader.availableBytes > 0) {
@@ -244,6 +256,12 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
       if (reader.availableBytes > 0) {
         ttsModelId = reader.read() as String?;
       }
+      if (reader.availableBytes > 0) {
+        ttsApiKey = reader.read() as String?;
+      }
+      if (reader.availableBytes > 0) {
+        ttsBaseUrl = reader.read() as String?;
+      }
     } catch (e) {
       // Backward compatibility: older versions don't have these fields
     }
@@ -273,6 +291,8 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
       customExportPath: customExportPath,
       editedImagePaths: editedImagePaths,
       ttsModelId: ttsModelId,
+      ttsApiKey: ttsApiKey,
+      ttsBaseUrl: ttsBaseUrl,
     );
   }
 
@@ -302,5 +322,7 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
     writer.write(obj.customExportPath);
     writer.writeList(obj.editedImagePaths);
     writer.write(obj.ttsModelId);
+    writer.write(obj.ttsApiKey);
+    writer.write(obj.ttsBaseUrl);
   }
 }

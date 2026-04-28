@@ -187,11 +187,16 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         final tempDir = await getTemporaryDirectory();
         final audioDir = p.join(tempDir.path, 'webkeyo_audio_${widget.projectId}');
 
-        final ttsService = TtsService();
+        final ttsService = TtsService(
+          providerId: project.ttsProviderId ?? 'flutter_tts',
+          apiKey: project.ttsApiKey,
+          baseUrl: project.ttsBaseUrl,
+          modelId: project.ttsModelId,
+        );
+        
         final syncData = await ttsService.generateAudioForScenes(
           scenesJson: scenes,
           saveDirectoryPath: audioDir,
-          ttsApiUrl: '',
           language: project.language,
           onProgress: (sceneNum) {
             if (mounted) {

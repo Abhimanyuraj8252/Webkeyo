@@ -4,94 +4,53 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 /// Service responsible for communicating with external TTS APIs, downloading audio,
 /// and calculating accurate durations required for FFmpeg video synchronization.
-/// Supports both local Flutter TTS and remote Edge TTS API endpoints.
 class TtsService {
   final FlutterTts _flutterTts = FlutterTts();
-  String? _edgeTtsApiUrl; // Optional Edge TTS API endpoint
+  final String providerId;
+  final String? apiKey;
+  final String? baseUrl;
+  final String? modelId;
 
-  TtsService({String? edgeTtsApiUrl}) {
-    _edgeTtsApiUrl = edgeTtsApiUrl;
+  TtsService({
+    this.providerId = 'flutter_tts',
+    this.apiKey,
+    this.baseUrl,
+    this.modelId,
+  }) {
     _initTts();
   }
 
   Future<void> _initTts() async {
-    await _flutterTts.setLanguage("hi-IN");
-    await _flutterTts.setSpeechRate(0.5);
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.setPitch(1.0);
+    try {
+      await _flutterTts.setLanguage("hi-IN");
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setPitch(1.0);
+    } catch (e) {
+      debugPrint('Flutter TTS init error: $e');
+    }
   }
 
-  /// Determines whether to use Edge TTS API or local Flutter TTS
-  bool get _useEdgeTts => _edgeTtsApiUrl != null && _edgeTtsApiUrl!.isNotEmpty;
-
   /// Generates audio files for a list of scenes and calculates their exact durations.
-  /// 
-  /// [scenesJson] is a list of maps containing 'scene_number' and 'narration'.
-  /// [saveDirectoryPath] is the local path where the .mp3 files will be stored.
-  /// [ttsApiUrl] is the endpoint to hit for TTS generation (unused if using flutter_tts).
-  /// [onProgress] is an optional callback to report which scene is currently being processed.
   Future<List<Map<String, dynamic>>> generateAudioForScenes({
     required List<dynamic> scenesJson,
     required String saveDirectoryPath,
-    required String ttsApiUrl,
     required String language,
     Function(int currentScene)? onProgress,
   }) async {
     final List<Map<String, dynamic>> audioSyncData = [];
     final player = AudioPlayer();
 
-    // Ensure the save directory exists
     final dir = Directory(saveDirectoryPath);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
 
-    // Comprehensive language mapping for global TTS support
-    final String langLower = language.toLowerCase();
-    final Map<String, String> languageMap = {
-      'hinglish': 'hi-IN',
-      'hindi': 'hi-IN',
-      'hi': 'hi-IN',
-      'hin': 'hi-IN',
-      'english': 'en-US',
-      'en': 'en-US',
-      'korean': 'ko-KR',
-      'ko': 'ko-KR',
-      'japanese': 'ja-JP',
-      'ja': 'ja-JP',
-      'spanish': 'es-ES',
-      'es': 'es-ES',
-      'french': 'fr-FR',
-      'fr': 'fr-FR',
-      'german': 'de-DE',
-      'de': 'de-DE',
-      'portuguese': 'pt-BR',
-      'pt': 'pt-BR',
-      'arabic': 'ar-SA',
-      'ar': 'ar-SA',
-      'chinese': 'zh-CN',
-      'zh': 'zh-CN',
-      'italian': 'it-IT',
-      'it': 'it-IT',
-      'russian': 'ru-RU',
-      'ru': 'ru-RU',
-      'thai': 'th-TH',
-      'th': 'th-TH',
-      'turkish': 'tr-TR',
-      'tr': 'tr-TR',
-      'vietnamese': 'vi-VN',
-      'vi': 'vi-VN',
-      'indonesian': 'id-ID',
-      'id': 'id-ID',
-    };
-
-    final String ttsLang = languageMap.entries
-        .where((e) => langLower.contains(e.key))
-        .map((e) => e.value)
-        .firstOrNull ?? 'en-US';
+    final String ttsLang = _mapLanguage(language);
     await _flutterTts.setLanguage(ttsLang);
 
     try {
@@ -108,97 +67,234 @@ class TtsService {
         final String fileName = 'scene_$sceneNumber.wav';
         final File savedFile = File(p.join(saveDirectoryPath, fileName));
         
-        // Use Edge TTS if URL is provided, otherwise use local Flutter TTS
-        if (_useEdgeTts) {
-          await _generateAudioWithEdgeTts(
-            narration: narration,
-            sceneNumber: sceneNumber,
-            savedFile: savedFile,
-            language: ttsLang,
-          );
-        } else {
-          // Use local Flutter TTS (default)
-          final result = await _flutterTts.synthesizeToFile(narration, savedFile.path);
+        // Remove existing file if any to avoid confusion
+        if (await savedFile.exists()) await savedFile.delete();
 
-          if (result != 1) {
-            debugPrint('Warning: flutter_tts synthesizeToFile failed for scene $sceneNumber');
-            continue;
-          }
+        bool success = false;
+        
+        switch (providerId) {
+          case 'edge_tts':
+            success = await _generateAudioWithEdgeTts(
+              narration: narration,
+              savedFile: savedFile,
+              language: ttsLang,
+            );
+            break;
+          case 'piper_tts':
+            success = await _generateAudioWithPiperTts(
+              narration: narration,
+              savedFile: savedFile,
+              language: ttsLang,
+            );
+            break;
+          case 'openai_tts':
+            success = await _generateAudioWithOpenAiTts(
+              narration: narration,
+              savedFile: savedFile,
+            );
+            break;
+          case 'elevenlabs':
+            success = await _generateAudioWithElevenLabs(
+              narration: narration,
+              savedFile: savedFile,
+            );
+            break;
+          case 'flutter_tts':
+          default:
+            final result = await _flutterTts.synthesizeToFile(narration, savedFile.path);
+            success = (result == 1);
+            break;
         }
 
-        // Wait a tiny bit for the file to be fully written
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Fallback to Flutter TTS if specific provider failed
+        if (!success && providerId != 'flutter_tts') {
+          debugPrint('Provider $providerId failed, falling back to local Flutter TTS');
+          final result = await _flutterTts.synthesizeToFile(narration, savedFile.path);
+          success = (result == 1);
+        }
+
+        if (!success) {
+          debugPrint('Warning: TTS failed for scene $sceneNumber');
+          continue;
+        }
+
+        // Wait for file to be ready
+        int retries = 5;
+        while (!savedFile.existsSync() && retries > 0) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          retries--;
+        }
 
         if (!savedFile.existsSync()) {
           debugPrint('Warning: Saved file does not exist for scene $sceneNumber');
           continue;
         }
 
-        // Load the saved file path into the player to extract its exact duration
-        final Duration? duration = await player.setFilePath(savedFile.path);
-        
-        final double durationInSeconds = duration != null 
-            ? duration.inMilliseconds / 1000.0 
-            : 0.0; // Fallback if duration cannot be extracted
+        // Extract duration
+        try {
+          final Duration? duration = await player.setFilePath(savedFile.path);
+          final double durationInSeconds = duration != null 
+              ? duration.inMilliseconds / 1000.0 
+              : 0.0;
 
-        if (durationInSeconds == 0.0) {
-          debugPrint('Warning: Could not extract duration for scene $sceneNumber');
+          audioSyncData.add({
+            'scene_number': sceneNumber,
+            'audio_path': savedFile.path,
+            'duration_in_seconds': durationInSeconds,
+          });
+        } catch (e) {
+          debugPrint('Error extracting duration for scene $sceneNumber: $e');
         }
-
-        // Map strictly matching FFmpeg engine requirements
-        audioSyncData.add({
-          'scene_number': sceneNumber,
-          'audio_path': savedFile.path,
-          'duration_in_seconds': durationInSeconds,
-        });
       }
     } finally {
-      // Always dispose of the player to free up native resources
       await player.dispose();
     }
 
     return audioSyncData;
   }
 
-  /// Generate audio using Edge TTS API endpoint
-  /// [narration] is the text to convert to speech
-  /// [sceneNumber] is the scene number for logging
-  /// [savedFile] is the file where the audio should be saved
-  /// [language] is the language code (e.g., 'hi-IN', 'en-US')
-  Future<void> _generateAudioWithEdgeTts({
+  String _mapLanguage(String language) {
+    final String langLower = language.toLowerCase();
+    final Map<String, String> languageMap = {
+      'hinglish': 'hi-IN',
+      'hindi': 'hi-IN',
+      'hi': 'hi-IN',
+      'english': 'en-US',
+      'en': 'en-US',
+      'japanese': 'ja-JP',
+      'korean': 'ko-KR',
+      'spanish': 'es-ES',
+      'french': 'fr-FR',
+      'german': 'de-DE',
+    };
+    
+    for (var entry in languageMap.entries) {
+      if (langLower.contains(entry.key)) return entry.value;
+    }
+    return 'en-US';
+  }
+
+  Future<bool> _generateAudioWithEdgeTts({
     required String narration,
-    required int sceneNumber,
     required File savedFile,
     required String language,
   }) async {
     try {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$_edgeTtsApiUrl/tts'),
-      )
-        ..fields['text'] = narration
-        ..fields['language'] = language
-        ..fields['voice'] = 'default';
+      final effectiveUrl = baseUrl != null && baseUrl!.isNotEmpty 
+          ? baseUrl! 
+          : 'https://edge-tts.vercel.app/api/tts';
+      
+      final response = await http.post(
+        Uri.parse(effectiveUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'text': narration,
+          'lang': language,
+          'voice': language == 'hi-IN' ? 'hi-IN-MadhurNeural' : 'en-US-AriaNeural',
+        }),
+      ).timeout(const Duration(seconds: 30));
 
-      final streamedResponse = await request.send();
-
-      if (streamedResponse.statusCode == 200) {
-        final bytes = await streamedResponse.stream.toBytes();
-        await savedFile.writeAsBytes(bytes);
-        debugPrint('Edge TTS generated audio for scene $sceneNumber');
-      } else {
-        debugPrint('Edge TTS API error for scene $sceneNumber: ${streamedResponse.statusCode}');
-        // Fallback to Flutter TTS
-        await _flutterTts.synthesizeToFile(narration, savedFile.path);
+      if (response.statusCode == 200) {
+        await savedFile.writeAsBytes(response.bodyBytes);
+        return true;
       }
-    } catch (e, stackTrace) {
-      debugPrint('Error generating audio with Edge TTS for scene $sceneNumber: $e\n$stackTrace');
-      // Fallback to Flutter TTS
-      try {
-        await _flutterTts.synthesizeToFile(narration, savedFile.path);
-      } catch (fallbackError) {
-        debugPrint('Fallback Flutter TTS also failed: $fallbackError');
-      }
+    } catch (e) {
+      debugPrint('Edge TTS Error: $e');
     }
+    return false;
+  }
+
+  Future<bool> _generateAudioWithPiperTts({
+    required String narration,
+    required File savedFile,
+    required String language,
+  }) async {
+    try {
+      if (baseUrl == null || baseUrl!.isEmpty) return false;
+      
+      final response = await http.post(
+        Uri.parse(baseUrl!),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'text': narration,
+          'model': modelId ?? 'en_US-lessac-medium',
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        await savedFile.writeAsBytes(response.bodyBytes);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Piper TTS Error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> _generateAudioWithOpenAiTts({
+    required String narration,
+    required File savedFile,
+  }) async {
+    try {
+      if (apiKey == null || apiKey!.isEmpty) return false;
+      
+      final url = (baseUrl != null && baseUrl!.isNotEmpty) 
+          ? baseUrl! 
+          : 'https://api.openai.com/v1/audio/speech';
+          
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': modelId ?? 'tts-1',
+          'input': narration,
+          'voice': 'alloy',
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        await savedFile.writeAsBytes(response.bodyBytes);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('OpenAI TTS Error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> _generateAudioWithElevenLabs({
+    required String narration,
+    required File savedFile,
+  }) async {
+    try {
+      if (apiKey == null || apiKey!.isEmpty) return false;
+      
+      final voiceId = modelId ?? '21m00Tcm4TlvDq8ikWAM'; // Default Rachel voice
+      final url = 'https://api.elevenlabs.io/v1/text-to-speech/$voiceId';
+          
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'xi-api-key': apiKey!,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'text': narration,
+          'model_id': 'eleven_monolingual_v1',
+        }),
+      ).timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        await savedFile.writeAsBytes(response.bodyBytes);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('ElevenLabs Error: $e');
+    }
+    return false;
   }
 }
+

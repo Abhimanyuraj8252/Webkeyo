@@ -49,3 +49,4 @@ app.*.map.json
 *.txt
 !README.md
 !assets/readme/banner.png
+webkeyo_audit_v3.md

@@ -33,12 +33,16 @@ jobs:
         continue-on-error: true
         run: flutter analyze > analyze.log 2>&1
 
-      - name: Upload analyze log
+      - name: Publish analyze issues to job summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: analyze-log
-          path: analyze.log
+        run: |
+          {
+            echo '## flutter analyze'
+            echo '```'
+            grep -E "(error|warning|info) •" analyze.log | head -80
+            tail -3 analyze.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if analyze found issues
         if: steps.analyze.outcome == 'failure'
@@ -49,12 +53,16 @@ jobs:
         continue-on-error: true
         run: flutter test > test.log 2>&1
 
-      - name: Upload test log
+      - name: Publish test issues to job summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-log
-          path: test.log
+        run: |
+          {
+            echo '## flutter test'
+            echo '```'
+            grep -E "\[E\]|Expected:|Actual:|Test failed" test.log | head -40
+            tail -5 test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if tests failed
         if: steps.test.outcome == 'failure'
@@ -86,12 +94,16 @@ jobs:
         continue-on-error: true
         run: flutter build apk --debug > build.log 2>&1
 
-      - name: Upload build log
+      - name: Publish build errors to job summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+        run: |
+          {
+            echo '## flutter build apk --debug'
+            echo '```'
+            grep -nE "error:|Error:|FAILURE:|What went wrong|Compilation failed|Exception" build.log | head -60
+            tail -10 build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if build failed
         if: steps.build.outcome == 'failure'

@@ -5,45 +5,94 @@ import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:image/image.dart' as img;
 
+/// Maps the user-facing resolution label to pixel dimensions.
+/// Top-level so it can be unit tested.
+({int width, int height}) resolutionToSize(String? resolution) {
+  switch (resolution) {
+    case '720p':
+      return (width: 1280, height: 720);
+    case '1440p':
+      return (width: 2560, height: 1440);
+    case '4K':
+      return (width: 3840, height: 2160);
+    case '1080p':
+    default:
+      return (width: 1920, height: 1080);
+  }
+}
+
 /// Advanced FFmpeg rendering service.
 /// Processes segmented scene generation and combination to prevent OOM errors
 /// on mobile devices, applying a cinematic Ken Burns effect to static images.
 class FfmpegService {
-  /// Renders a full video by generating intermediate scene mp4s and concatenating them.
+  /// Renders a full video by generating intermediate scene mp4s and
+  /// concatenating them.
   ///
-  /// [syncData] expects maps with 'image_path', 'audio_path', and 'duration_in_seconds'.
-  /// [outputDirectory] is the root directory to store the final output.
+  /// [syncData] expects maps with 'image_path', 'audio_path', and
+  /// 'duration_in_seconds'.
+  /// [outputDirectory] is the root directory for temporary scene files.
   /// [projectName] is used for creating unique project folders and file names.
-  /// [onProgress] returns a 0.0 to 1.0 double indicating overall rendering progress.
+  /// [resolution] — '720p' | '1080p' | '1440p' | '4K' (default 1080p).
+  /// [exportPath] — directory for the final video (falls back to the public
+  ///   Movies/Webkeyo directory on Android, then the app temp directory).
+  /// [bgmPath] — optional background music file, mixed under the narration.
+  /// [onProgress] returns a 0.0 to 1.0 double indicating overall progress.
   Future<String?> renderFinalVideo({
     required List<Map<String, dynamic>> syncData,
     required String outputDirectory,
     required String projectName,
     required Function(double) onProgress,
+    String? resolution,
+    String? exportPath,
+    String? bgmPath,
   }) async {
-    // Force export to public Movies directory on Android
-    final String publicExportDir = '/storage/emulated/0/Movies/Webkeyo';
-    final Directory exportDirObj = Directory(publicExportDir);
-    if (!await exportDirObj.exists()) {
+    final ({int width, int height}) size = resolutionToSize(resolution);
+    final int width = size.width;
+    final int height = size.height;
+
+    // Determine export directory: user-chosen path first, then public
+    // Movies/Webkeyo on Android, then the app temp directory.
+    String finalExportDir = outputDirectory;
+    if (exportPath != null && exportPath.trim().isNotEmpty) {
       try {
-        await exportDirObj.create(recursive: true);
+        final d = Directory(exportPath.trim());
+        if (!await d.exists()) await d.create(recursive: true);
+        finalExportDir = d.path;
       } catch (e) {
-        debugPrint("Could not create public directory, falling back to app dir: $e");
+        debugPrint('Custom export path unavailable ($e), using default');
+      }
+    } else {
+      final String publicExportDir = '/storage/emulated/0/Movies/Webkeyo';
+      final Directory exportDirObj = Directory(publicExportDir);
+      if (!await exportDirObj.exists()) {
+        try {
+          await exportDirObj.create(recursive: true);
+        } catch (e) {
+          debugPrint("Could not create public directory, falling back to app dir: $e");
+        }
+      }
+      if (await exportDirObj.exists()) {
+        finalExportDir = publicExportDir;
       }
     }
-    
-    // We use the app's directory for temporary chunks to avoid cluttering public storage
+
+    // We use the app's directory for temporary chunks to avoid cluttering
+    // public storage.
     final String projectDir = p.join(outputDirectory, projectName);
     final Directory dir = Directory(projectDir);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
 
+    final File? bgmFile =
+        (bgmPath != null && bgmPath.trim().isNotEmpty) ? File(bgmPath.trim()) : null;
+    final bool hasBgm = bgmFile != null && await bgmFile.exists();
+
     final List<String> intermediateFiles = [];
     final int totalScenes = syncData.length;
 
     try {
-      // Step A & B & C: Loop through syncData and render each scene
+      // Loop through syncData and render each scene.
       for (int i = 0; i < totalScenes; i++) {
         final sceneData = syncData[i];
         final String imagePath = sceneData['image_path'];
@@ -72,21 +121,19 @@ class FfmpegService {
 
         // High-performance filter strategy:
         // Landscape: zoompan zooming slightly into center
-        // Portrait (Manga): scale width to 1920 (height will be huge), then zoompan sliding Y from 0 to bottom
+        // Portrait (Manga): scale width to target, then zoompan sliding Y from
+        // the top to the bottom of the page.
         String filterComplex;
         if (isPortrait) {
-          // Scale image so width is 1920. 
-          // Then zoompan: z=1 (no zoom), x=0, y slides from 0 down to the bottom
-          filterComplex = 
-              "scale=1920:-1,"
-              "zoompan=z='1.0':y='(ih-1080)*(on/$totalFrames)':x='0':d=$totalFrames:s=1920x1080,"
+          filterComplex =
+              "scale=$width:-1,"
+              "zoompan=z='1.0':y='(ih-$height)*(on/$totalFrames)':x='0':d=$totalFrames:s=${width}x$height,"
               "format=yuv420p";
         } else {
-          // Zoom in slightly for landscape
-          filterComplex = 
-              "scale=1920:1080:force_original_aspect_ratio=increase,"
-              "crop=1920:1080,"
-              "zoompan=z='1.15':d=$totalFrames:s=1920x1080,"
+          filterComplex =
+              "scale=$width:$height:force_original_aspect_ratio=increase,"
+              "crop=$width:$height,"
+              "zoompan=z='1.15':d=$totalFrames:s=${width}x$height,"
               "format=yuv420p";
         }
 
@@ -112,25 +159,36 @@ class FfmpegService {
         onProgress((i + 1) / totalScenes * 0.9);
       }
 
-      // Step D: Generate concat.txt
+      // Generate concat.txt
       final String concatFilePath = p.join(projectDir, 'concat.txt');
       final File concatFile = File(concatFilePath);
       final StringBuffer concatContent = StringBuffer();
 
       for (String file in intermediateFiles) {
-        // FFmpeg safe format string requires forward slashes and exact single quotes
+        // FFmpeg safe format string requires forward slashes and exact single
+        // quotes
         final String safePath = file.replaceAll(Platform.pathSeparator, '/');
         concatContent.writeln("file '$safePath'");
       }
       await concatFile.writeAsString(concatContent.toString());
 
-      // Step E: Run concat demuxer
       // Final video export path
       final String finalVideoPath = p.join(
-        exportDirObj.existsSync() ? publicExportDir : outputDirectory, 
-        '${projectName}_final.mp4'
+        finalExportDir,
+        '${projectName}_final.mp4',
       );
-      final String concatCommand = "-f concat -safe 0 -i \"$concatFilePath\" -c copy -y \"$finalVideoPath\"";
+
+      // Concat step — optionally mix background music under the narration.
+      String concatCommand;
+      if (hasBgm) {
+        final String safeBgm = bgmFile!.path.replaceAll(Platform.pathSeparator, '/');
+        concatCommand = "-f concat -safe 0 -i \"$concatFilePath\" "
+            "-stream_loop -1 -i \"$safeBgm\" "
+            "-filter_complex \"[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]\" "
+            "-map 0:v -map \"[aout]\" -c:v copy -c:a aac -b:a 192k -y \"$finalVideoPath\"";
+      } else {
+        concatCommand = "-f concat -safe 0 -i \"$concatFilePath\" -c copy -y \"$finalVideoPath\"";
+      }
 
       debugPrint("Executing FFmpeg Concat:\n$concatCommand");
 
@@ -145,7 +203,7 @@ class FfmpegService {
 
       onProgress(1.0); // 100% complete
 
-      // Step F: Cleanup intermediate assets to immediately free up user storage
+      // Cleanup intermediate assets to immediately free up user storage
       _cleanupIntermediateFiles(intermediateFiles, concatFile);
 
       return finalVideoPath;

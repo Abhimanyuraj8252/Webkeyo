@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +8,29 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdfx/pdfx.dart' as px;
+
+/// Platform-safe output directory under shared storage
+/// (Movies/webkeyo/<sub>) with an app-documents fallback. Works on Android
+/// and iOS instead of the old hardcoded /storage/emulated/0 paths.
+Future<String> _webkeyoOutputDir(String sub) async {
+  try {
+    final shared = await getExternalStorageDirectory();
+    if (shared != null) {
+      final d = Directory(p.join(shared.path, 'Movies', 'webkeyo', sub));
+      await d.create(recursive: true);
+      final probe = File(p.join(d.path, '.write_test'));
+      await probe.writeAsString('ok');
+      await probe.delete();
+      return d.path;
+    }
+  } catch (e) {
+    debugPrint('Shared storage output unavailable: $e');
+  }
+  final docs = await getApplicationDocumentsDirectory();
+  final d = Directory(p.join(docs.path, 'webkeyo', sub));
+  await d.create(recursive: true);
+  return d.path;
+}
 
 class ToolsScreen extends StatelessWidget {
   const ToolsScreen({super.key});
@@ -211,10 +235,8 @@ class _AdvancedCbzToPdfScreenState extends State<AdvancedCbzToPdfScreen> {
 
       setState(() { _statusMessage = 'Saving PDF...'; _progress = 0.95; });
       
-      final rootPath = '/storage/emulated/0';
       final baseName = p.basenameWithoutExtension(_selectedFile!.path);
-      final outputDir = Directory('$rootPath/Movies/webkeyo/pdf/$baseName');
-      await outputDir.create(recursive: true);
+      final outputDir = Directory(await _webkeyoOutputDir('pdf/$baseName'));
 
       final outputPath = '${outputDir.path}/${baseName}_Pro.pdf';
       final outFile = File(outputPath);
@@ -342,8 +364,7 @@ class _CbzToImageScreenState extends State<CbzToImageScreen> {
       final bytes = await _selectedFile!.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
       final baseName = p.basenameWithoutExtension(_selectedFile!.path);
-      final outputDir = Directory('/storage/emulated/0/Movies/webkeyo/images/$baseName');
-      await outputDir.create(recursive: true);
+      final outputDir = Directory(await _webkeyoOutputDir('images/$baseName'));
 
       int i = 0;
       for (final file in archive) {
@@ -470,8 +491,7 @@ class _PdfToImageScreenState extends State<PdfToImageScreen> {
     try {
       final pdfFile = _selectedFile!;
       final baseName = p.basenameWithoutExtension(pdfFile.path);
-      final outputDir = Directory('/storage/emulated/0/Movies/webkeyo/images/$baseName');
-      await outputDir.create(recursive: true);
+      final outputDir = Directory(await _webkeyoOutputDir('images/$baseName'));
 
       final document = await px.PdfDocument.openFile(pdfFile.path);
       for (int i = 1; i <= document.pagesCount; i++) {
@@ -609,8 +629,7 @@ class _ImageToPdfScreenState extends State<ImageToPdfScreen> {
         i++;
       }
 
-      final outputDir = Directory('/storage/emulated/0/Movies/webkeyo/pdf/merged');
-      await outputDir.create(recursive: true);
+      final outputDir = Directory(await _webkeyoOutputDir('pdf/merged'));
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final outFile = File('${outputDir.path}/merged_$timestamp.pdf');
       await outFile.writeAsBytes(await doc.save());
@@ -774,8 +793,7 @@ class _MergePdfScreenState extends State<MergePdfScreen> {
         processedFiles++;
       }
 
-      final outputDir = Directory('/storage/emulated/0/Movies/webkeyo/pdf/merged');
-      await outputDir.create(recursive: true);
+      final outputDir = Directory(await _webkeyoOutputDir('pdf/merged'));
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final mergedPath = '${outputDir.path}/merged_$timestamp.pdf';
 

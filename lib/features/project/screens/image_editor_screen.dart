@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -80,6 +81,43 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     _loadProject();
   }
 
+  /// Scene number -> index in (extracted + edited) combined list.
+  /// The pipeline resolves override indices against the same combined list.
+  int? _overrideFor(Map<int, int> overrides, int sceneNumber) =>
+      overrides[sceneNumber];
+
+  void _setOverride(int sceneNumber, int? combinedIndex) {
+    final project = _project!;
+    final overrides = Map<int, int>.from(project.sceneImageOverrides);
+    if (combinedIndex == null) {
+      overrides.remove(sceneNumber);
+    } else {
+      overrides[sceneNumber] = combinedIndex;
+    }
+    project.sceneImageOverrides = overrides;
+    project.save();
+    _loadProject();
+  }
+
+  List<int> _sceneNumbers() {
+    final project = _project;
+    if (project == null || project.generatedScript == null) return [];
+    try {
+      final dynamic data = jsonDecode(project.generatedScript!);
+      if (data is Map && data['scenes'] is List) {
+        final nums = <int>[];
+        for (final s in data['scenes'] as List) {
+          if (s is Map && s['scene_number'] is num) {
+            nums.add((s['scene_number'] as num).toInt());
+          }
+        }
+        nums.sort();
+        return nums;
+      }
+    } catch (_) {}
+    return [];
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_project == null) {
@@ -91,12 +129,16 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
 
     final originalImages = _project!.extractedImagePaths;
     final editedImages = _project!.editedImagePaths;
+    final sceneNumbers = _sceneNumbers();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scene Editor'),
       ),
-      body: Row(
+      body: Column(
+        children: [
+          Expanded(
+            child: Row(
         children: [
           // Original files section
           Expanded(
@@ -201,6 +243,73 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
             ),
           ),
         ],
+      ),
+    ),
+    // Scene → Image overrides: point any script scene at any image
+    // (original page or a cropped "extra scene").
+    if (sceneNumbers.isNotEmpty)
+      Container(
+        height: 132,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(40),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Icon(Icons.link_rounded, size: 18),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'Scene overrides (optional): point a script scene at any image',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: sceneNumbers.map((num) {
+                  final combinedCount = originalImages.length + editedImages.length;
+                  final override = _overrideFor(_project!.sceneImageOverrides, num);
+                  // -1 = "no override" sentinel (dropdowns can't hold null).
+                  return DropdownButtonFormField<int>(
+                    key: ValueKey('override_$num'),
+                    initialValue: override ?? -1,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 4),
+                      labelStyle: TextStyle(fontSize: 11),
+                    ),
+                    hint: Text(
+                      'Scene $num',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    dropdownColor: Theme.of(context).colorScheme.surface,
+                    items: [
+                      DropdownMenuItem(
+                        value: -1,
+                        child: Text('Scene $num → default',
+                            style: const TextStyle(fontSize: 11)),
+                      ),
+                      for (int i = 0; i < combinedCount; i++)
+                        DropdownMenuItem(
+                          value: i,
+                          child: Text(
+                            'Scene $num → '
+                            '${i < originalImages.length ? 'Page ${i + 1}' : 'Cropped ${i - originalImages.length + 1}'}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => _setOverride(num, (v == null || v == -1) ? null : v),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
       ),
     );
   }

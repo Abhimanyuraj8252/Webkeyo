@@ -162,17 +162,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 ListTile(
                   leading: Icon(Icons.high_quality_rounded, color: theme.primaryColor),
-                  title: const Text('Video Resolution'),
-                  subtitle: Text(_videoResolution),
+                  title: const Text('Video Resolution (default)'),
+                  subtitle: Text(
+                    '$_videoResolution — can be changed per project in the Video tab',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _showResolutionDialog,
                 ),
                 const Divider(height: 1),
                 ListTile(
                   leading: Icon(Icons.folder_outlined, color: theme.primaryColor),
-                  title: const Text('Export Path'),
+                  title: const Text('Default Export Path'),
                   subtitle: Text(
-                    _exportPath,
+                    _exportPath.isEmpty
+                        ? 'Movies/Webkeyo/ (system default)'
+                        : '$_exportPath (used when a project has no custom path)',
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.inter(fontSize: 12),
                   ),

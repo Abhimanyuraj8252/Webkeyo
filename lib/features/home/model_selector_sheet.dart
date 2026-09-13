@@ -25,7 +25,7 @@ class ModelSelectorSheet extends StatefulWidget {
 }
 
 class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
-  AIProviderModel? _selectedProvider;
+  String? _selectedProviderId;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -76,9 +76,22 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
       );
     }
 
-    _selectedProvider ??= providers.first;
+    // Resolve the selected provider without mutating state inside build().
+    AIProviderModel selectedProvider;
+    if (_selectedProviderId != null) {
+      selectedProvider = providers
+              .where((p) => p.id == _selectedProviderId)
+              .firstOrNull ??
+          providers.first;
+    } else {
+      selectedProvider = providers.first;
+      final id = selectedProvider.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _selectedProviderId == null) _selectedProviderId = id;
+      });
+    }
 
-    final allModels = registry.getModelsByProvider(_selectedProvider!.id);
+    final allModels = registry.getModelsByProvider(selectedProvider.id);
     // Filter by search query
     final filteredModels = _searchQuery.isEmpty
         ? allModels
@@ -188,7 +201,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                   itemCount: providers.length,
                   itemBuilder: (context, index) {
                     final provider = providers[index];
-                    final isSelected = _selectedProvider?.id == provider.id;
+                    final isSelected = selectedProvider.id == provider.id;
                     return Padding(
                       padding:
                           const EdgeInsets.only(right: AppConstants.paddingSmall),
@@ -207,7 +220,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                         onSelected: (selected) {
                           if (selected) {
                             setState(() {
-                              _selectedProvider = provider;
+                              _selectedProviderId = provider.id;
                               _searchQuery = '';
                               _searchController.clear();
                             });
@@ -232,7 +245,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                             const SizedBox(height: 12),
                             Text(
                               _searchQuery.isEmpty
-                                  ? 'No models fetched for ${_selectedProvider?.name}.\nGo to Settings to fetch models.'
+                                  ? 'No models fetched for ${selectedProvider.name}.\nGo to Settings to fetch models.'
                                   : 'No results for "$_searchQuery"',
                               textAlign: TextAlign.center,
                               style: GoogleFonts.inter(

@@ -8,6 +8,7 @@ import '../tools/tools_screen.dart';
 import '../../models/ai_provider_model.dart';
 import '../../core/constants.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/provider_registry.dart';
 import '../../models/project_model.dart';
 import '../project/screens/project_context_screen.dart';
@@ -60,37 +61,53 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result != null && result.files.isNotEmpty && mounted) {
       final registry = Provider.of<ProviderRegistry>(context, listen: false);
 
-      // Find the user's selected vision provider details
+      // Resolve the user's selected vision provider details
       String? visionBaseUrl;
       String? visionApiKey;
       String? visionModelId;
-      
       if (_selectedVisionModelObj != null) {
-        final provider = registry.providers.firstWhere(
-          (p) => p.id == _selectedVisionModelObj!.providerId,
-          orElse: () => registry.providers.firstWhere(
-            (p) => p.category == ProviderCategory.vision && p.isEnabled,
-            orElse: () => AIProviderModel(id: '', name: '', category: ProviderCategory.vision),
-          ),
-        );
-        visionBaseUrl = provider.customBaseUrl;
-        visionApiKey = provider.apiKey;
+        final provider = _resolveProvider(registry, _selectedVisionModelObj!.providerId, ProviderCategory.vision);
+        visionBaseUrl = provider?.customBaseUrl;
+        visionApiKey = provider?.apiKey;
         visionModelId = _selectedVisionModelObj!.id;
       } else {
-        // Fallback: use first enabled vision provider
-        final visionProviders = registry.providers
-            .where((p) => p.category == ProviderCategory.vision && p.isEnabled)
-            .toList();
-        if (visionProviders.isNotEmpty) {
-          visionBaseUrl = visionProviders.first.customBaseUrl;
-          visionApiKey = visionProviders.first.apiKey;
-          final models = registry.getModelsByProvider(visionProviders.first.id);
-          visionModelId = models.isNotEmpty ? models.first.id : null;
+        visionModelId = _fallbackModelId(registry, ProviderCategory.vision);
+        if (visionModelId != null) {
+          final provider = _fallbackProvider(registry, ProviderCategory.vision);
+          visionBaseUrl = provider?.customBaseUrl;
+          visionApiKey = provider?.apiKey;
         }
       }
 
+      // Note: the text (script) provider is resolved from the registry at
+      // use-time (Script Editor "Polish with AI"), so no key is snapshotted
+      // here — it can't go stale.
+
+      // Resolve the user's selected TTS provider details (key + base URL
+      // must reach the pipeline, otherwise cloud TTS always falls back).
+      String? ttsModelId;
+      String? ttsApiKey;
+      String? ttsBaseUrl;
+      if (_selectedTtsModelObj != null) {
+        ttsModelId = _selectedTtsModelObj!.id;
+        final provider = _resolveProvider(registry, _selectedTtsModelObj!.providerId, ProviderCategory.tts);
+        ttsBaseUrl = provider?.customBaseUrl;
+        ttsApiKey = provider?.apiKey;
+      }
+
+      // Global default resolution from Settings (project can override later).
+      String defaultResolution = '1080p';
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        defaultResolution = prefs.getString('global_video_resolution') ?? '1080p';
+      } catch (_) {}
+
+      // Create a project for EVERY picked file (multi-select is supported).
+      String? firstProjectId;
+      final int seq = DateTime.now().millisecondsSinceEpoch;
+      int fileIndex = 0;
       for (var file in result.files) {
-        final projectId = DateTime.now().millisecondsSinceEpoch.toString();
+        final projectId = '${seq}_${fileIndex}';
         final newProject = ProjectModel(
           id: projectId,
           title: file.name,
@@ -98,6 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
           language: _selectedLanguage,
           isNsfw: _isNsfwEnabled,
           generationMode: _selectedMode,
+          videoResolution: defaultResolution,
           visionProviderId: _selectedVisionModelObj?.providerId,
           visionModelId: visionModelId,
           visionBaseUrl: visionBaseUrl,
@@ -105,24 +123,50 @@ class _HomeScreenState extends State<HomeScreen> {
           textProviderId: _selectedTextModelObj?.providerId,
           textModelId: _selectedTextModelObj?.id,
           ttsProviderId: _selectedTtsModelObj?.providerId,
+          ttsModelId: ttsModelId,
+          ttsApiKey: ttsApiKey,
+          ttsBaseUrl: ttsBaseUrl,
           status: 'created',
         );
 
+        fileIndex++;
         await registry.projectsBox.put(projectId, newProject);
-        registry.refreshProjects();
+        firstProjectId ??= projectId;
+      }
+      registry.refreshProjects();
 
-        // Navigate to project context screen for the first file
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ProjectContextScreen(projectId: projectId),
-            ),
-          ).then((_) => setState(() {})); // Refresh dashboard on return
-        }
-        break; // Process first file, rest queued
+      // Navigate to the project context screen for the first file; the rest
+      // are visible on the dashboard.
+      if (firstProjectId != null && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProjectContextScreen(projectId: firstProjectId),
+          ),
+        ).then((_) => setState(() {})); // Refresh dashboard on return
       }
     }
+  }
+
+  AIProviderModel? _resolveProvider(
+    ProviderRegistry registry,
+    String providerId,
+    ProviderCategory category,
+  ) {
+    return registry.providers.where((p) => p.id == providerId).firstOrNull;
+  }
+
+  AIProviderModel? _fallbackProvider(ProviderRegistry registry, ProviderCategory category) {
+    return registry.providers
+        .where((p) => p.category == category && p.isEnabled)
+        .firstOrNull;
+  }
+
+  String? _fallbackModelId(ProviderRegistry registry, ProviderCategory category) {
+    final provider = _fallbackProvider(registry, category);
+    if (provider == null) return null;
+    final models = registry.getModelsByProvider(provider.id);
+    return models.isNotEmpty ? models.first.id : null;
   }
 
   Future<void> _pickFolder() async {
@@ -131,7 +175,40 @@ class _HomeScreenState extends State<HomeScreen> {
       final registry = Provider.of<ProviderRegistry>(context, listen: false);
       final projectId = DateTime.now().millisecondsSinceEpoch.toString();
       final folderName = folderPath.split('/').last;
-      
+
+      // Same provider resolution as file projects.
+      String? visionBaseUrl;
+      String? visionApiKey;
+      String? visionModelId;
+      if (_selectedVisionModelObj != null) {
+        final provider = _resolveProvider(registry, _selectedVisionModelObj!.providerId, ProviderCategory.vision);
+        visionBaseUrl = provider?.customBaseUrl;
+        visionApiKey = provider?.apiKey;
+        visionModelId = _selectedVisionModelObj!.id;
+      } else {
+        visionModelId = _fallbackModelId(registry, ProviderCategory.vision);
+        if (visionModelId != null) {
+          final provider = _fallbackProvider(registry, ProviderCategory.vision);
+          visionBaseUrl = provider?.customBaseUrl;
+          visionApiKey = provider?.apiKey;
+        }
+      }
+      String? ttsModelId;
+      String? ttsApiKey;
+      String? ttsBaseUrl;
+      if (_selectedTtsModelObj != null) {
+        ttsModelId = _selectedTtsModelObj!.id;
+        final provider = _resolveProvider(registry, _selectedTtsModelObj!.providerId, ProviderCategory.tts);
+        ttsBaseUrl = provider?.customBaseUrl;
+        ttsApiKey = provider?.apiKey;
+      }
+
+      String defaultResolution = '1080p';
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        defaultResolution = prefs.getString('global_video_resolution') ?? '1080p';
+      } catch (_) {}
+
       final newProject = ProjectModel(
         id: projectId,
         title: folderName,
@@ -139,12 +216,23 @@ class _HomeScreenState extends State<HomeScreen> {
         language: _selectedLanguage,
         isNsfw: _isNsfwEnabled,
         generationMode: _selectedMode,
+        videoResolution: defaultResolution,
+        visionProviderId: _selectedVisionModelObj?.providerId,
+        visionModelId: visionModelId,
+        visionBaseUrl: visionBaseUrl,
+        visionApiKey: visionApiKey,
+        textProviderId: _selectedTextModelObj?.providerId,
+        textModelId: _selectedTextModelObj?.id,
+        ttsProviderId: _selectedTtsModelObj?.providerId,
+        ttsModelId: ttsModelId,
+        ttsApiKey: ttsApiKey,
+        ttsBaseUrl: ttsBaseUrl,
         status: 'created',
       );
-      
+
       await registry.projectsBox.put(projectId, newProject);
       registry.refreshProjects();
-      
+
       if (mounted) {
         Navigator.push(
           context,
@@ -177,6 +265,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openProject(ProjectModel project) {
+    // Resume from the correct phase based on persisted status, so an app
+    // kill mid-pipeline never forces a full (and paid) re-run.
+    final int? resumePhase = switch (project.status) {
+      'extracting' => 1,
+      'scripting' => 2,
+      'audio' => 4,
+      'rendering' => 5,
+      _ => null,
+    };
+
     if (project.status == 'done' && project.finalVideoPath != null) {
       // Show completion dialog with options
       showDialog(
@@ -205,13 +303,19 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.push(context, MaterialPageRoute(
         builder: (_) => ScriptEditorScreen(projectId: project.id),
       )).then((_) => setState(() {}));
-    } else if (project.status == 'created') {
+    } else if (project.status == 'created' || project.status == 'error') {
+      // 'error' also lands here: the project screen is the control center
+      // where the user picks which phase to re-run.
       Navigator.push(context, MaterialPageRoute(
         builder: (_) => ProjectContextScreen(projectId: project.id),
       )).then((_) => setState(() {}));
+    } else if (resumePhase != null) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => PipelineProgressScreen(projectId: project.id, startPhase: resumePhase),
+      )).then((_) => setState(() {}));
     } else {
       Navigator.push(context, MaterialPageRoute(
-        builder: (_) => PipelineProgressScreen(projectId: project.id),
+        builder: (_) => ProjectContextScreen(projectId: project.id),
       )).then((_) => setState(() {}));
     }
   }
@@ -260,6 +364,21 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const SizedBox(height: AppConstants.paddingMedium),
+
+              // First-run setup banner: a vision provider is required.
+              if (!registry.providers.any(
+                    (p) => p.category == ProviderCategory.vision && p.isEnabled,
+                  ))
+                _SetupBanner(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    ).then((_) => setState(() {}));
+                  },
+                ).animate().fadeIn().slideY(begin: -0.1),
+
               const SizedBox(height: AppConstants.paddingMedium),
 
               // Quick Model Selectors
@@ -549,6 +668,51 @@ class _HomeScreenState extends State<HomeScreen> {
           tooltip: 'Settings',
         ),
       ],
+    );
+  }
+}
+
+/// Shown on first launch until a vision provider has been enabled.
+class _SetupBanner extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _SetupBanner({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.paddingMedium),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withAlpha(60),
+        borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+        border: Border.all(color: theme.colorScheme.primary.withAlpha(120)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.rocket_launch_rounded),
+          const SizedBox(width: AppConstants.paddingMedium),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Welcome to Webkeyo!',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text(
+                  'Add an AI provider (Groq, Gemini, OpenRouter…) to start generating videos.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          FilledButton.tonal(
+            onPressed: onTap,
+            child: const Text('Setup'),
+          ),
+        ],
+      ),
     );
   }
 }

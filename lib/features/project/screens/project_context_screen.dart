@@ -4,14 +4,21 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../../../core/constants.dart';
 import '../../../models/project_model.dart';
 import '../../../models/ai_provider_model.dart';
+import 'package:webkeyo/services/api_service.dart';
+import 'package:webkeyo/services/face_detection_service.dart';
 import 'package:webkeyo/services/provider_registry.dart';
+import 'package:webkeyo/services/srt_service.dart';
+import 'package:webkeyo/services/tts_service.dart' show mapTtsLanguage, edgeVoicesForLocale;
 import 'package:webkeyo/features/home/model_selector_sheet.dart';
 import 'package:webkeyo/features/pipeline/screens/pipeline_progress_screen.dart';
 import '../../../features/pipeline/screens/script_editor_screen.dart';
 import '../../../features/pipeline/screens/video_preview_screen.dart';
+import 'character_assignment_screen.dart';
 import 'image_editor_screen.dart';
 
 class ProjectContextScreen extends StatefulWidget {
@@ -28,6 +35,7 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
   late TabController _tabController;
   final TextEditingController _ttsApiKeyController = TextEditingController();
   final TextEditingController _ttsBaseUrlController = TextEditingController();
+  final TextEditingController _ttsVoiceIdController = TextEditingController();
 
   @override
   void initState() {
@@ -41,6 +49,7 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
     _tabController.dispose();
     _ttsApiKeyController.dispose();
     _ttsBaseUrlController.dispose();
+    _ttsVoiceIdController.dispose();
     super.dispose();
   }
 
@@ -51,6 +60,8 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
       if (_project != null) {
         _ttsApiKeyController.text = _project!.ttsApiKey ?? '';
         _ttsBaseUrlController.text = _project!.ttsBaseUrl ?? '';
+        _ttsVoiceIdController.text =
+            (_project!.ttsProviderId == 'elevenlabs') ? (_project!.ttsModelId ?? '') : '';
       }
     });
   }
@@ -131,6 +142,7 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
         builder: (_) => VideoPreviewScreen(
           videoPath: _project!.finalVideoPath!,
           projectName: _project!.title,
+          projectId: widget.projectId,
         ),
       ),
     );
@@ -144,6 +156,232 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
         builder: (_) => ImageEditorScreen(projectId: widget.projectId),
       ),
     ).then((_) => _loadProject());
+  }
+
+  void _snack(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  /// Resolves the project's vision provider (with registry fallback).
+  ({String key, String base, String model})? _resolveVision(
+    ProviderRegistry registry,
+    ProjectModel project,
+  ) {
+    String key = project.visionApiKey ?? '';
+    String base = project.visionBaseUrl ?? '';
+    String model = project.visionModelId ?? '';
+    if (key.isEmpty || base.isEmpty || model.isEmpty) {
+      final visionProviders = registry.providers
+          .where((pr) => pr.category == ProviderCategory.vision && pr.isEnabled)
+          .toList();
+      if (visionProviders.isEmpty) return null;
+      key = visionProviders.first.apiKey ?? '';
+      base = visionProviders.first.customBaseUrl ?? '';
+      final models = registry.getModelsByProvider(visionProviders.first.id);
+      model = models.isNotEmpty ? models.first.id : '';
+    }
+    if (key.isEmpty || base.isEmpty || model.isEmpty) return null;
+    return (key: key, base: base, model: model);
+  }
+
+  // ── Auto-detect characters with Vision AI ──────────────────────────
+  Future<void> _detectCharactersWithAI() async {
+    final project = _project;
+    if (project == null) return;
+    if (project.extractedImagePaths.isEmpty) {
+      _snack('Extract images first (run the pipeline or Re-extract).');
+      return;
+    }
+
+    final registry = Provider.of<ProviderRegistry>(context, listen: false);
+    final vision = _resolveVision(registry, project);
+    if (vision == null) {
+      _snack('No vision provider configured. Set one up in Settings → AI Providers.');
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Detecting characters with AI...')));
+      final result = await ApiService().autoDetectCharacters(
+        imagePaths: project.extractedImagePaths,
+        apiKey: vision.key,
+        baseUrl: vision.base,
+        modelId: vision.model,
+      );
+      if (!mounted) return;
+
+      final controller = TextEditingController(text: result);
+      final useIt = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Detected Characters'),
+          content: SizedBox(
+            height: 300,
+            width: double.maxFinite,
+            child: TextField(
+              controller: controller,
+              maxLines: null,
+              style: GoogleFonts.inter(fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Detected characters...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Add to Context'),
+            ),
+          ],
+        ),
+      );
+      if (useIt == true && controller.text.trim().isNotEmpty) {
+        project.charactersContext =
+            (project.charactersContext != null && project.charactersContext!.trim().isNotEmpty)
+                ? '${project.charactersContext!}\n${controller.text.trim()}'
+                : controller.text.trim();
+        await project.save();
+        _loadProject();
+        messenger.showSnackBar(
+            const SnackBar(content: Text('Characters added to project context.')));
+      }
+    } catch (e) {
+      _snack('Detection failed: $e');
+    }
+  }
+
+  // ── On-device face detection + manual assignment ───────────────────
+  Future<void> _detectFacesAndAssign() async {
+    final project = _project;
+    if (project == null) return;
+    if (project.extractedImagePaths.isEmpty) {
+      _snack('Extract images first (run the pipeline or Re-extract).');
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Detecting faces with on-device ML...')));
+      final faces =
+          await FaceDetectionService.extractFacesFromImages(project.extractedImagePaths);
+      if (!mounted) return;
+      if (faces.isEmpty) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('No faces detected in the pages.')));
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              CharacterAssignmentScreen(project: project, faceImagePaths: faces),
+        ),
+      );
+      _loadProject();
+    } catch (e) {
+      _snack('Face detection failed: $e');
+    }
+  }
+
+  // ── Export subtitles (SRT) ─────────────────────────────────────────
+  Future<void> _exportSrt() async {
+    final project = _project;
+    if (project == null) return;
+    if (project.generatedScript == null || project.generatedScript!.isEmpty) {
+      _snack('Generate a script first.');
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      messenger.showSnackBar(const SnackBar(content: Text('Building SRT subtitles...')));
+      final tempDir = await getTemporaryDirectory();
+      final audioDir = p.join(tempDir.path, 'webkeyo_audio_${project.id}');
+      final srtPath = await SrtService.generateSrt(
+        projectId: project.id,
+        audioDir: audioDir,
+        scriptJson: project.generatedScript,
+        outputDir: tempDir.path,
+      );
+      if (srtPath == null) {
+        _snack('Could not build SRT — scene audio missing. Generate audio first.');
+        return;
+      }
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save subtitles (SRT)',
+        fileName: '${project.title}_subtitles.srt',
+        initialDirectory: (await getExternalStorageDirectory())?.path,
+        type: FileType.custom,
+        allowedExtensions: ['srt'],
+      );
+      if (result != null) {
+        await File(result).writeAsBytes(await File(srtPath).readAsBytes());
+        _snack('SRT saved to $result');
+      }
+    } catch (e) {
+      _snack('SRT export failed: $e');
+    }
+  }
+
+  // ── Background music picker ────────────────────────────────────────
+  Future<void> _pickBgm() async {
+    final project = _project;
+    if (project == null) return;
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['mp3', 'wav', 'm4a', 'ogg', 'flac'],
+    );
+    if (result != null && result.files.single.path != null) {
+      project.bgmPath = result.files.single.path;
+      await project.save();
+      _loadProject();
+      _snack('Background music set: ${result.files.single.name}');
+    }
+  }
+
+  Future<void> _clearBgm() async {
+    final project = _project;
+    if (project == null) return;
+    project.bgmPath = null;
+    await project.save();
+    _loadProject();
+    _snack('Background music removed.');
+  }
+
+  // ── TTS voice picker (Edge TTS) ────────────────────────────────────
+  Future<void> _pickTtsVoice() async {
+    final project = _project;
+    if (project == null) return;
+    if (project.ttsProviderId != 'edge_tts') {
+      _snack('Voice picker is available for Microsoft Edge TTS.');
+      return;
+    }
+    final voices = edgeVoicesForLocale(mapTtsLanguage(project.language));
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Select Voice'),
+        children: ['Auto (language default)', ...voices]
+            .map((v) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, v),
+                  child: Text(v, style: GoogleFonts.inter(fontSize: 13)),
+                ))
+            .toList(),
+      ),
+    );
+    if (selected == null) return;
+    project.ttsVoice = (selected == 'Auto (language default)') ? null : selected;
+    await project.save();
+    _loadProject();
   }
 
   // ── Change export path ─────────────────────────────────────────────
@@ -166,6 +404,10 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
   Future<void> _changeProjectModel(ProviderCategory category) async {
     final selected = await ModelSelectorSheet.show(context, category);
     if (selected != null && _project != null) {
+      final registry = Provider.of<ProviderRegistry>(context, listen: false);
+      final provider =
+          registry.providers.where((p) => p.id == selected.providerId).firstOrNull;
+
       setState(() {
         if (category == ProviderCategory.text) {
           _project!.textModelId = selected.id;
@@ -173,9 +415,21 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
         } else if (category == ProviderCategory.tts) {
           _project!.ttsModelId = selected.id;
           _project!.ttsProviderId = selected.providerId;
+          // Carry the provider's key/base URL so cloud TTS actually works
+          // (without this, the pipeline would always fall back to local TTS).
+          if (provider != null) {
+            _project!.ttsApiKey = provider.apiKey;
+            _project!.ttsBaseUrl = provider.customBaseUrl;
+          }
         } else if (category == ProviderCategory.vision) {
           _project!.visionModelId = selected.id;
           _project!.visionProviderId = selected.providerId;
+          // Switching vision providers must also switch the API URL + key,
+          // otherwise the call goes to the wrong endpoint with a wrong key.
+          if (provider != null) {
+            _project!.visionBaseUrl = provider.customBaseUrl;
+            _project!.visionApiKey = provider.apiKey;
+          }
         }
       });
       await _project!.save();
@@ -312,6 +566,30 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
                 label: 'Open Image Editor',
                 color: Colors.orangeAccent,
                 onPressed: _openImageEditor,
+              ),
+              const SizedBox(height: AppConstants.paddingSmall),
+              Row(
+                children: [
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.auto_awesome_rounded,
+                      label: 'Detect Characters (AI)',
+                      color: cs.tertiary,
+                      outlined: true,
+                      onPressed: _detectCharactersWithAI,
+                    ),
+                  ),
+                  const SizedBox(width: AppConstants.paddingSmall),
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.face_retouching_natural_rounded,
+                      label: 'Detect Faces',
+                      color: cs.secondary,
+                      outlined: true,
+                      onPressed: _detectFacesAndAssign,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: AppConstants.paddingSmall),
               _ActionButton(
@@ -509,6 +787,14 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
           const SizedBox(height: AppConstants.paddingLarge),
           _buildModelSection(cs, 'TTS Provider', ProviderCategory.tts, p.ttsModelId, p.ttsProviderId)
               .animate().fadeIn(delay: 50.ms),
+          if (p.ttsProviderId == 'edge_tts') ...[
+            const SizedBox(height: AppConstants.paddingSmall),
+            _SettingsRow(
+              label: 'Voice',
+              value: p.ttsVoice ?? 'Auto (${mapTtsLanguage(p.language)})',
+              onTap: _pickTtsVoice,
+            ),
+          ],
           if (p.ttsProviderId != null && p.ttsProviderId != 'flutter_tts') ...[
             const SizedBox(height: AppConstants.paddingLarge),
             _SectionCard(
@@ -544,6 +830,22 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
                     p.save();
                   },
                 ),
+                if (p.ttsProviderId == 'elevenlabs') ...[
+                  const SizedBox(height: AppConstants.paddingMedium),
+                  TextField(
+                    controller: _ttsVoiceIdController,
+                    decoration: const InputDecoration(
+                      labelText: 'Voice ID',
+                      hintText: 'e.g. 21m00Tcm4TlvDq8ikWAM (Rachel)',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.record_voice_over_outlined),
+                    ),
+                    onChanged: (val) {
+                      p.ttsModelId = val.isEmpty ? null : val;
+                      p.save();
+                    },
+                  ),
+                ],
               ],
             ).animate().fadeIn(delay: 100.ms),
           ],
@@ -583,6 +885,14 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
                 ),
                 const SizedBox(height: AppConstants.paddingSmall),
               ],
+              _ActionButton(
+                icon: Icons.subtitles_rounded,
+                label: 'Export Subtitles (SRT)',
+                color: Colors.amber,
+                outlined: true,
+                onPressed: _exportSrt,
+              ),
+              const SizedBox(height: AppConstants.paddingSmall),
               _ActionButton(
                 icon: Icons.movie_creation_rounded,
                 label: hasVideo ? 'Re-render Video' : 'Render Final Video',
@@ -624,6 +934,49 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
               ),
             ],
           ).animate().fadeIn().slideY(begin: 0.05),
+          const SizedBox(height: AppConstants.paddingLarge),
+          _SectionCard(
+            icon: Icons.music_note_rounded,
+            iconColor: Colors.tealAccent,
+            title: 'Background Music',
+            subtitle: p.bgmPath != null
+                ? '♪ ${p.bgmPath!.split('/').last} (mixed under narration)'
+                : 'Optional: adds a music bed to the final video',
+            children: [
+              if (p.bgmPath != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ActionButton(
+                        icon: Icons.stop_rounded,
+                        label: 'Remove Music',
+                        color: Colors.redAccent,
+                        outlined: true,
+                        onPressed: _clearBgm,
+                      ),
+                    ),
+                    const SizedBox(width: AppConstants.paddingSmall),
+                    Expanded(
+                      child: _ActionButton(
+                        icon: Icons.swap_horiz_rounded,
+                        label: 'Change Music',
+                        color: Colors.tealAccent,
+                        outlined: true,
+                        onPressed: _pickBgm,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                _ActionButton(
+                  icon: Icons.queue_music_rounded,
+                  label: 'Add Music File (mp3/wav/m4a)',
+                  color: Colors.tealAccent,
+                  outlined: true,
+                  onPressed: _pickBgm,
+                ),
+            ],
+          ).animate().fadeIn(delay: 30.ms).slideY(begin: 0.05),
           const SizedBox(height: AppConstants.paddingLarge),
           _SectionCard(
             icon: Icons.folder_outlined,

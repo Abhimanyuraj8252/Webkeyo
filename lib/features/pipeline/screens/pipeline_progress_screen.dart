@@ -1,25 +1,33 @@
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:provider/provider.dart';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../core/constants.dart';
-import '../../../services/provider_registry.dart';
+import '../../../models/project_model.dart';
+import '../../../models/ai_provider_model.dart';
 import '../../../services/api_service.dart';
 import '../../../services/conversion_service.dart';
-import '../../../services/tts_service.dart';
 import '../../../services/ffmpeg_service.dart';
-
-import '../../../models/ai_provider_model.dart';
+import '../../../services/notification_service.dart';
+import '../../../services/provider_registry.dart';
+import '../../../services/tts_service.dart';
+import '../../project/screens/project_context_screen.dart';
 import 'script_editor_screen.dart';
 import 'video_preview_screen.dart';
-import '../../project/screens/project_context_screen.dart';
 
 class PipelineProgressScreen extends StatefulWidget {
   final String projectId;
+
+  /// 1 = extract, 2 = script, 4 = audio, 5 = render
   final int startPhase;
 
   const PipelineProgressScreen({
@@ -42,7 +50,6 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
     'AI Analyzing & Writing Script',
     'Waiting for User Script Approval',
     'Generating Audio',
-    'Applying YouTube Fit Cropping',
     'Rendering Final Video',
   ];
 
@@ -54,14 +61,21 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
   }
 
   Future<void> _runPipeline() async {
+    List<Map<String, dynamic>>? finalSyncData;
+
     try {
       final registry = Provider.of<ProviderRegistry>(context, listen: false);
       final project = registry.projectsBox.get(widget.projectId);
       if (project == null || project.sourceFilePath == null) {
-        throw Exception("Project or source file missing.");
+        throw Exception('Project or source file missing.');
       }
 
-      // Phase 1: Extracting Images
+      await NotificationService.instance.show(
+        'Webkeyo Pipeline',
+        'Started: ${project.title} (phase $_currentPhase)',
+      );
+
+      // ── Phase 1: Extracting Images ────────────────────────────────
       if (_currentPhase == 1) {
         setState(() => _statusMessage = 'Extracting images from source file...');
         project.status = 'extracting';
@@ -94,13 +108,20 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         project.extractedImagePaths = images;
         await project.save();
 
-        if (images.isEmpty) throw Exception("No images extracted from source file.");
+        if (images.isEmpty) throw Exception('No images extracted from source file.');
 
+        if (!mounted) return;
         setState(() => _currentPhase = 2);
       }
 
-      // Phase 2: AI Scripting
+      // ── Phase 2: AI Scripting ─────────────────────────────────────
       if (_currentPhase == 2) {
+        // Connectivity guard — the vision API needs internet.
+        final ConnectivityResult connectivity = await Connectivity().checkConnectivity();
+        if (connectivity == ConnectivityResult.none) {
+          throw Exception('No internet connection. Connect to WiFi/mobile data and retry.');
+        }
+
         setState(() => _statusMessage = 'Sending images to Vision AI...');
         project.status = 'scripting';
         await project.save();
@@ -110,14 +131,15 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         String baseUrl = project.visionBaseUrl ?? '';
         String modelId = project.visionModelId ?? '';
 
-        // Fallback: if project doesn't have provider info, find first enabled vision provider
+        // Fallback: if project doesn't have provider info, find first
+        // enabled vision provider.
         if (apiKey.isEmpty || baseUrl.isEmpty || modelId.isEmpty) {
           final visionProviders = registry.providers
-              .where((p) => p.category == ProviderCategory.vision && p.isEnabled)
+              .where((pr) => pr.category == ProviderCategory.vision && pr.isEnabled)
               .toList();
           if (visionProviders.isEmpty) {
             throw Exception(
-              "No Vision API Provider configured. Please go to Settings → AI Providers and enable one.",
+              'No Vision API Provider configured. Please go to Settings → AI Providers and enable one.',
             );
           }
           apiKey = visionProviders.first.apiKey ?? '';
@@ -140,7 +162,7 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
           apiKey: apiKey,
           baseUrl: baseUrl,
           modelId: modelId,
-          customPrompt: "",
+          customPrompt: '',
           charactersContext: project.charactersContext,
           generationMode: project.generationMode,
         );
@@ -149,10 +171,11 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         project.status = 'script_ready';
         await project.save();
 
+        if (!mounted) return;
         setState(() => _currentPhase = 3);
       }
 
-      // Phase 3: Wait for Script Approval
+      // ── Phase 3: Wait for Script Approval ─────────────────────────
       if (_currentPhase == 3) {
         if (mounted) {
           Navigator.pushReplacement(
@@ -165,7 +188,7 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         return;
       }
 
-      // Phase 4 & 5: Audio Generation & Video Rendering
+      // ── Phase 4: Audio Generation ─────────────────────────────────
       if (_currentPhase == 4) {
         setState(() => _statusMessage = 'Generating Audio via TTS...');
         project.status = 'audio';
@@ -176,12 +199,12 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         try {
           scriptData = jsonDecode(rawJson);
         } catch (e) {
-          throw Exception("Invalid script JSON. Please edit and fix the script format.");
+          throw Exception('Invalid script JSON. Please edit and fix the script format.');
         }
         final List<dynamic> scenes = scriptData['scenes'] ?? [];
 
         if (scenes.isEmpty) {
-          throw Exception("Script has no scenes. Please regenerate or edit the script.");
+          throw Exception('Script has no scenes. Please regenerate or edit the script.');
         }
 
         final tempDir = await getTemporaryDirectory();
@@ -192,12 +215,15 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
           apiKey: project.ttsApiKey,
           baseUrl: project.ttsBaseUrl,
           modelId: project.ttsModelId,
+          voice: project.ttsVoice,
         );
-        
+
         final syncData = await ttsService.generateAudioForScenes(
           scenesJson: scenes,
           saveDirectoryPath: audioDir,
           language: project.language,
+          // On retry, reuse scenes that already have audio on disk.
+          reuseExisting: true,
           onProgress: (sceneNum) {
             if (mounted) {
               setState(() => _statusMessage = 'Generating Audio: Scene $sceneNum / ${scenes.length}...');
@@ -205,50 +231,67 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
           },
         );
 
-        // Map audio files to image paths
-        final List<Map<String, dynamic>> finalSyncData = [];
-        for (var scene in syncData) {
-          int sceneNum = scene['scene_number'];
-          // Safe lookup: find matching scene by scene_number
-          Map<String, dynamic>? matchingScene;
-          for (var s in scenes) {
-            if (s is Map<String, dynamic> && s['scene_number'] == sceneNum) {
-              matchingScene = s;
-              break;
-            }
-          }
-          int imageIndex = matchingScene?['image_index'] ?? 0;
+        finalSyncData = _mapScenesToImages(project, scenes, syncData);
 
-          if (imageIndex >= 0 && imageIndex < project.extractedImagePaths.length) {
-            finalSyncData.add({
-              'image_path': project.extractedImagePaths[imageIndex],
-              'audio_path': scene['audio_path'],
-              'duration_in_seconds': scene['duration_in_seconds'],
-            });
-          }
+        if (finalSyncData!.isEmpty) {
+          throw Exception(
+            'No valid scene-to-image mappings found. Check the script\'s image_index values.',
+          );
         }
 
-        if (finalSyncData.isEmpty) {
-          throw Exception("No valid scene-to-image mappings found. Check the script's image_index values.");
-        }
+        if (!mounted) return;
+        setState(() => _currentPhase = 5);
+      }
 
-        setState(() {
-          _currentPhase = 5;
-          _statusMessage = 'FFmpeg: Rendering cinematic video...';
-        });
+      // ── Phase 5: Video Rendering ──────────────────────────────────
+      if (_currentPhase == 5) {
+        setState(() => _statusMessage = 'FFmpeg: Rendering cinematic video...');
         project.status = 'rendering';
         await project.save();
 
+        // If we resumed straight into rendering (e.g. after an app kill),
+        // rebuild the scene→image mapping from the audio files on disk.
+        if (finalSyncData == null || finalSyncData!.isEmpty) {
+          final String rawJson = project.generatedScript ?? '';
+          Map<String, dynamic> scriptData;
+          try {
+            scriptData = jsonDecode(rawJson);
+          } catch (e) {
+            throw Exception('Invalid script JSON. Please go back and fix the script.');
+          }
+          final List<dynamic> scenes = scriptData['scenes'] ?? [];
+          finalSyncData = await _buildSyncDataFromDisk(project, scenes);
+        }
+
+        if (finalSyncData!.isEmpty) {
+          throw Exception(
+            'No audio found for the script. Generate audio first (Audio tab).',
+          );
+        }
+
+        final tempDir = await getTemporaryDirectory();
         final ffmpegService = FfmpegService();
+
+        // Export path priority: project override → global Settings value →
+        // default public Movies/Webkeyo (inside FfmpegService).
+        String? exportPath = project.customExportPath;
+        if (exportPath == null || exportPath.isEmpty) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            exportPath = prefs.getString('global_export_path');
+          } catch (_) {}
+        }
+
         final String? videoPath = await ffmpegService.renderFinalVideo(
-          syncData: finalSyncData,
+          syncData: finalSyncData!,
           outputDirectory: tempDir.path,
           projectName: widget.projectId,
+          resolution: project.videoResolution,
+          exportPath: exportPath,
+          bgmPath: project.bgmPath,
           onProgress: (progress) {
             if (mounted) {
-              setState(
-                () => _statusMessage = 'Rendering Video: ${(progress * 100).toStringAsFixed(1)}%...',
-              );
+              setState(() => _statusMessage = 'Rendering Video: ${(progress * 100).toStringAsFixed(1)}%...');
             }
           },
         );
@@ -257,17 +300,25 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
           project.finalVideoPath = videoPath;
           project.status = 'done';
           await project.save();
+          await NotificationService.instance.show(
+            'Webkeyo Pipeline',
+            'Video ready: ${project.title}',
+          );
           if (mounted) {
             setState(() {
-              _currentPhase = 7;
+              _currentPhase = 6; // past the last phase = all complete
               _statusMessage = 'Video Generated Successfully!';
             });
           }
         } else {
-          throw Exception("FFmpeg Rendering Failed.");
+          throw Exception('FFmpeg Rendering Failed.');
         }
       }
     } catch (e) {
+      await NotificationService.instance.show(
+        'Webkeyo Pipeline',
+        'Pipeline failed: $e',
+      );
       if (mounted) {
         // Update project status to error
         try {
@@ -285,6 +336,106 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
         });
       }
     }
+  }
+
+  /// All images the video can reference: extracted pages first, then any
+  /// cropped "extra scenes" from the Image Editor (appended, so the script's
+  /// image_index values remain valid).
+  List<String> _allImages(ProjectModel project) {
+    final List<String> all = List<String>.from(project.extractedImagePaths);
+    for (final edited in project.editedImagePaths) {
+      if (!all.contains(edited)) all.add(edited);
+    }
+    return all;
+  }
+
+  /// Maps TTS output (scene_number + audio) back to real image paths,
+  /// honoring per-scene image overrides set in the Image Editor.
+  List<Map<String, dynamic>> _mapScenesToImages(
+    ProjectModel project,
+    List<dynamic> scenes,
+    List<Map<String, dynamic>> syncData,
+  ) {
+    final List<String> allImages = _allImages(project);
+    final List<Map<String, dynamic>> finalSyncData = [];
+    for (var scene in syncData) {
+      final dynamic numRaw = scene['scene_number'];
+      if (numRaw is! num) continue;
+      final int sceneNum = numRaw.toInt();
+      Map<String, dynamic>? matchingScene;
+      for (var s in scenes) {
+        if (s is Map && s['scene_number'] == sceneNum) {
+          matchingScene = s;
+          break;
+        }
+      }
+
+      int imageIndex = 0;
+      if (matchingScene != null) {
+        if (matchingScene['image_index'] is num) {
+          imageIndex = (matchingScene['image_index'] as num).toInt();
+        }
+        final override = project.sceneImageOverrides[sceneNum];
+        if (override != null) imageIndex = override;
+      }
+
+      if (imageIndex >= 0 && imageIndex < allImages.length) {
+        finalSyncData.add({
+          'image_path': allImages[imageIndex],
+          'audio_path': scene['audio_path'],
+          'duration_in_seconds': scene['duration_in_seconds'],
+        });
+      }
+    }
+    return finalSyncData;
+  }
+
+  /// Rebuilds the scene→image mapping straight from the audio files that
+  /// TTS already produced (used when resuming the render after a crash).
+  Future<List<Map<String, dynamic>>> _buildSyncDataFromDisk(
+    ProjectModel project,
+    List<dynamic> scenes,
+  ) async {
+    final tempDir = await getTemporaryDirectory();
+    final audioDir = p.join(tempDir.path, 'webkeyo_audio_${widget.projectId}');
+    final player = AudioPlayer();
+    final result = <Map<String, dynamic>>[];
+    final List<String> allImages = _allImages(project);
+
+    try {
+      for (var s in scenes) {
+        if (s is! Map) continue;
+        final dynamic numRaw = s['scene_number'];
+        if (numRaw is! num) continue;
+        final int sceneNum = numRaw.toInt();
+
+        final File audioFile = File(p.join(audioDir, 'scene_$sceneNum.wav'));
+        if (!await audioFile.exists()) continue;
+
+        double duration = 0;
+        try {
+          final Duration? d = await player.setFilePath(audioFile.path);
+          if (d != null) duration = d.inMilliseconds / 1000.0;
+        } catch (_) {}
+        if (duration <= 0) continue;
+
+        int imageIndex = 0;
+        if (s['image_index'] is num) imageIndex = (s['image_index'] as num).toInt();
+        final override = project.sceneImageOverrides[sceneNum];
+        if (override != null) imageIndex = override;
+
+        if (imageIndex >= 0 && imageIndex < allImages.length) {
+          result.add({
+            'image_path': allImages[imageIndex],
+            'audio_path': audioFile.path,
+            'duration_in_seconds': duration,
+          });
+        }
+      }
+    } finally {
+      await player.dispose();
+    }
+    return result;
   }
 
   @override
@@ -381,6 +532,7 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
                         _hasError = false;
                         _statusMessage = 'Retrying...';
                       });
+                      // Retry from the phase that was running.
                       _runPipeline();
                     },
                     style: ElevatedButton.styleFrom(

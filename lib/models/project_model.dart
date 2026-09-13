@@ -54,6 +54,12 @@ class ProjectModel extends HiveObject {
   String? ttsApiKey;
   @HiveField(25)
   String? ttsBaseUrl;
+  @HiveField(26)
+  String? ttsVoice; // Edge TTS voice override (null = auto per language)
+  @HiveField(27)
+  Map<int, int> sceneImageOverrides; // scene_number -> image index override
+  @HiveField(28)
+  String? bgmPath; // Optional background music file for the final render
 
   ProjectModel({
     required this.id,
@@ -82,8 +88,12 @@ class ProjectModel extends HiveObject {
     this.ttsModelId,
     this.ttsApiKey,
     this.ttsBaseUrl,
+    this.ttsVoice,
+    Map<int, int>? sceneImageOverrides,
+    this.bgmPath,
   })  : extractedImagePaths = extractedImagePaths ?? [],
         editedImagePaths = editedImagePaths ?? [],
+        sceneImageOverrides = sceneImageOverrides ?? {},
         createdAt = createdAt ?? DateTime.now();
 
   String get statusDisplay {
@@ -159,6 +169,9 @@ class ProjectModel extends HiveObject {
     String? ttsModelId,
     String? ttsApiKey,
     String? ttsBaseUrl,
+    String? ttsVoice,
+    Map<int, int>? sceneImageOverrides,
+    String? bgmPath,
   }) {
     return ProjectModel(
       id: id,
@@ -187,6 +200,9 @@ class ProjectModel extends HiveObject {
       ttsModelId: ttsModelId ?? this.ttsModelId,
       ttsApiKey: ttsApiKey ?? this.ttsApiKey,
       ttsBaseUrl: ttsBaseUrl ?? this.ttsBaseUrl,
+      ttsVoice: ttsVoice ?? this.ttsVoice,
+      sceneImageOverrides: sceneImageOverrides ?? this.sceneImageOverrides,
+      bgmPath: bgmPath ?? this.bgmPath,
     );
   }
 }
@@ -226,6 +242,9 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
     String? ttsModelId;
     String? ttsApiKey;
     String? ttsBaseUrl;
+    String? ttsVoice;
+    Map<int, int> sceneImageOverrides = {};
+    String? bgmPath;
 
     try {
       if (reader.availableBytes > 0) {
@@ -262,6 +281,20 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
       if (reader.availableBytes > 0) {
         ttsBaseUrl = reader.read() as String?;
       }
+      if (reader.availableBytes > 0) {
+        ttsVoice = reader.read() as String?;
+      }
+      if (reader.availableBytes > 0) {
+        final raw = reader.read() as Map<dynamic, dynamic>?;
+        if (raw != null) {
+          for (final e in raw.entries) {
+            sceneImageOverrides[(e.key as num).toInt()] = (e.value as num).toInt();
+          }
+        }
+      }
+      if (reader.availableBytes > 0) {
+        bgmPath = reader.read() as String?;
+      }
     } catch (e) {
       // Backward compatibility: older versions don't have these fields
     }
@@ -293,6 +326,9 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
       ttsModelId: ttsModelId,
       ttsApiKey: ttsApiKey,
       ttsBaseUrl: ttsBaseUrl,
+      ttsVoice: ttsVoice,
+      sceneImageOverrides: sceneImageOverrides,
+      bgmPath: bgmPath,
     );
   }
 
@@ -324,5 +360,8 @@ class ProjectModelAdapter extends TypeAdapter<ProjectModel> {
     writer.write(obj.ttsModelId);
     writer.write(obj.ttsApiKey);
     writer.write(obj.ttsBaseUrl);
+    writer.write(obj.ttsVoice);
+    writer.write(obj.sceneImageOverrides);
+    writer.write(obj.bgmPath);
   }
 }

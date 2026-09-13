@@ -1,20 +1,32 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:video_player/video_player.dart';
-import 'package:share_plus/share_plus.dart';
-import '../../../core/constants.dart';
 
-/// Full-screen video preview with playback controls, share, and save.
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
+
+import '../../../core/constants.dart';
+import '../../../services/provider_registry.dart';
+import '../../../services/srt_service.dart';
+
+/// Full-screen video preview with playback controls, share, SRT export.
 class VideoPreviewScreen extends StatefulWidget {
   final String videoPath;
   final String projectName;
+
+  /// Optional project id — enables SRT export (needs script + audio data).
+  final String? projectId;
 
   const VideoPreviewScreen({
     super.key,
     required this.videoPath,
     required this.projectName,
+    this.projectId,
   });
 
   @override
@@ -23,8 +35,10 @@ class VideoPreviewScreen extends StatefulWidget {
 
 class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
   late VideoPlayerController _controller;
+  bool _controllerCreated = false;
   bool _isInitialized = false;
   bool _showControls = true;
+  bool _srtBusy = false;
   String _errorMessage = '';
 
   @override
@@ -41,6 +55,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
     }
 
     _controller = VideoPlayerController.file(file);
+    _controllerCreated = true;
 
     try {
       await _controller.initialize();
@@ -53,11 +68,17 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
     }
   }
 
+  void _togglePlay() {
+    if (_controller.value.isPlaying) {
+      _controller.pause();
+    } else {
+      _controller.play();
+    }
+  }
+
   @override
   void dispose() {
-    if (_isInitialized) {
-      _controller.dispose();
-    }
+    if (_controllerCreated) _controller.dispose();
     super.dispose();
   }
 
@@ -85,6 +106,66 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
     }
   }
 
+  Future<void> _exportSrt() async {
+    final registry = Provider.of<ProviderRegistry>(context, listen: false);
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (widget.projectId == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('SRT export is available from a project.')),
+      );
+      return;
+    }
+
+    final project = registry.projectsBox.get(widget.projectId!);
+    if (project == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Project not found.')),
+      );
+      return;
+    }
+
+    setState(() => _srtBusy = true);
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final audioDir = p.join(tempDir.path, 'webkeyo_audio_${project.id}');
+      final srtPath = await SrtService.generateSrt(
+        projectId: project.id,
+        audioDir: audioDir,
+        scriptJson: project.generatedScript,
+        outputDir: tempDir.path,
+      );
+
+      if (srtPath == null) {
+        messenger.showSnackBar(
+          const SnackBar(
+              content:
+                  Text('Could not build SRT — script or scene audio missing.')),
+        );
+        return;
+      }
+
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save subtitles (SRT)',
+        fileName: '${project.title}_subtitles.srt',
+        initialDirectory: (await getExternalStorageDirectory())?.path,
+        type: FileType.custom,
+        allowedExtensions: ['srt'],
+      );
+
+      if (result != null) {
+        await File(result).writeAsBytes(await File(srtPath).readAsBytes());
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text(result != null ? 'SRT saved to $result' : 'SRT generated (save cancelled)')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('SRT export failed: $e')));
+    } finally {
+      if (mounted) setState(() => _srtBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -100,6 +181,18 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
         ),
         actions: [
+          if (widget.projectId != null)
+            IconButton(
+              icon: _srtBusy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.subtitles_rounded),
+              tooltip: 'Export subtitles (SRT)',
+              onPressed: _srtBusy ? null : _exportSrt,
+            ),
           IconButton(
             icon: const Icon(Icons.share_rounded),
             onPressed: _shareVideo,
@@ -166,13 +259,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                                   : Icons.play_circle_filled,
                               color: Colors.white,
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _controller.value.isPlaying
-                                    ? _controller.pause()
-                                    : _controller.play();
-                              });
-                            },
+                            onPressed: _togglePlay,
                           ),
                         ),
                       ),

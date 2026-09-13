@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'core/theme.dart';
 import 'features/home/home_screen.dart';
+import 'services/notification_service.dart';
 import 'services/provider_registry.dart';
 
 /// Global theme state management using Hive for persistence.
@@ -35,12 +37,21 @@ class ThemeNotifier extends ChangeNotifier {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Route uncaught framework errors to the log so they are at least visible.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('Uncaught FlutterError: ${details.exceptionAsString()}\n${details.stack}');
+  };
+
   // Initialize local storage
   await Hive.initFlutter();
 
   // Initialize provider registry
   final providerRegistry = ProviderRegistry();
   await providerRegistry.init();
+
+  // Initialize notifications (non-critical; fails silently)
+  await NotificationService.instance.init();
 
   // Initialize theme
   final themeNotifier = ThemeNotifier();
@@ -72,20 +83,25 @@ class _GlobalMediaAppState extends State<GlobalMediaApp> {
   }
 
   Future<void> _requestPermissions() async {
-    // Request storage permissions on Android
-    if (await Permission.storage.isDenied) {
-      await Permission.storage.request();
+    try {
+      // Request storage permissions on Android
+      if (await Permission.storage.isDenied) {
+        await Permission.storage.request();
+      }
+      // Android 11+ needs MANAGE_EXTERNAL_STORAGE for public directory writes
+      if (await Permission.manageExternalStorage.isDenied) {
+        await Permission.manageExternalStorage.request();
+      }
+      // Android 13+ granular media permissions
+      await [
+        Permission.photos,
+        Permission.videos,
+        Permission.audio,
+      ].request();
+    } catch (e) {
+      // Permission APIs can throw on unsupported platforms (desktop/web).
+      debugPrint('Permission request skipped: $e');
     }
-    // Android 11+ needs MANAGE_EXTERNAL_STORAGE for public directory writes
-    if (await Permission.manageExternalStorage.isDenied) {
-      await Permission.manageExternalStorage.request();
-    }
-    // Android 13+ granular media permissions
-    await [
-      Permission.photos,
-      Permission.videos,
-      Permission.audio,
-    ].request();
   }
 
   @override

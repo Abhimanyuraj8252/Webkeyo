@@ -36,6 +36,9 @@ class ProviderRegistry extends ChangeNotifier {
     // If box is empty, initialize with default providers
     if (_providers.isEmpty) {
       await _initializeDefaultProviders();
+    } else {
+      // Existing installs may still carry stale/duplicate entries.
+      await _cleanupLegacyProviders();
     }
   }
 
@@ -80,64 +83,76 @@ class ProviderRegistry extends ChangeNotifier {
   }
 
   Future<void> _initializeDefaultProviders() async {
+    // Only OpenAI-compatible providers are listed (the app speaks
+    // /chat/completions + /models). Providers without a working
+    // OpenAI-compatible endpoint are intentionally omitted.
     final defaultProviders = [
       // --- TEXT / SCRIPT PROVIDERS ---
       AIProviderModel(id: 'openrouter', name: 'OpenRouter', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://openrouter.ai/api/v1'),
       AIProviderModel(id: 'groq', name: 'Groq', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.groq.com/openai/v1'),
       AIProviderModel(id: 'openai', name: 'OpenAI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
-      AIProviderModel(id: 'anthropic', name: 'Anthropic', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.anthropic.com/v1'),
       AIProviderModel(id: 'gemini', name: 'Google Gemini', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai'),
       AIProviderModel(id: 'together', name: 'Together AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.together.xyz/v1'),
       AIProviderModel(id: 'deepseek', name: 'DeepSeek', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.deepseek.com/v1'),
       AIProviderModel(id: 'fireworks', name: 'Fireworks AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.fireworks.ai/inference/v1'),
-      
+      AIProviderModel(id: 'mistral', name: 'Mistral AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
+      AIProviderModel(id: 'perplexity', name: 'Perplexity', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.perplexity.ai'),
+      AIProviderModel(id: 'anyscale', name: 'Anyscale', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.endpoints.anyscale.com/v1'),
+      AIProviderModel(id: 'novita', name: 'Novita AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.novita.ai/v3/openai'),
+      AIProviderModel(id: 'nomic', name: 'Nomic AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.nomic.ai/v1'),
+      AIProviderModel(id: 'moonshot', name: 'Moonshot (Kimi)', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.moonshot.cn/v1'),
+      AIProviderModel(id: 'zhipu', name: 'Zhipu AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://open.bigmodel.cn/api/paas/v4'),
+      AIProviderModel(id: 'nvidia_nim', name: 'NVIDIA NIM', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://integrate.api.nvidia.com/v1'),
+
       // --- VISION PROVIDERS (Supports free tiers & high limits) ---
       AIProviderModel(id: 'gemini_vision', name: 'Google Gemini Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai'),
       AIProviderModel(id: 'openrouter_vision', name: 'OpenRouter Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://openrouter.ai/api/v1'),
-      AIProviderModel(id: 'anthropic_vision', name: 'Anthropic Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.anthropic.com/v1'),
       AIProviderModel(id: 'openai_vision', name: 'OpenAI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
       AIProviderModel(id: 'together_vision', name: 'Together AI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.together.xyz/v1'),
-      AIProviderModel(id: 'novita_vision', name: 'Novita AI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.novita.ai/v3/openai'),
-      AIProviderModel(id: 'mistral', name: 'Mistral AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
-      AIProviderModel(id: 'cohere', name: 'Cohere', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.cohere.ai/v1'),
-      AIProviderModel(id: 'perplexity', name: 'Perplexity', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.perplexity.ai'),
-      AIProviderModel(id: 'anyscale', name: 'Anyscale', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.endpoints.anyscale.com/v1'),
-      AIProviderModel(id: 'huggingface', name: 'HuggingFace', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api-inference.huggingface.co/models'),
-      AIProviderModel(id: 'novita', name: 'Novita AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.novita.ai/v3/openai'),
-      AIProviderModel(id: 'nomic', name: 'Nomic AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.nomic.ai/v1'),
-      AIProviderModel(id: 'replicate', name: 'Replicate', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.replicate.com/v1'),
-      AIProviderModel(id: 'aws_bedrock', name: 'AWS Bedrock', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: ''),
-      AIProviderModel(id: 'azure_openai', name: 'Azure OpenAI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: ''),
-      AIProviderModel(id: 'moonshot', name: 'Moonshot (Kimi)', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.moonshot.cn/v1'),
-      AIProviderModel(id: 'zhipu', name: 'Zhipu AI', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://open.bigmodel.cn/api/paas/v4'),
-      AIProviderModel(id: 'mistral_text', name: 'Mistral AI (Text)', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
-      AIProviderModel(id: 'nvidia_nim', name: 'NVIDIA NIM (Text)', category: ProviderCategory.text, requiresApiKey: true, customBaseUrl: 'https://integrate.api.nvidia.com/v1'),
-
-      // --- VISION / IMAGE PROVIDERS ---
-      AIProviderModel(id: 'openai_vision', name: 'OpenAI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
-      AIProviderModel(id: 'google_vision', name: 'Google Gemini Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai'),
-      AIProviderModel(id: 'anthropic_vision', name: 'Anthropic Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.anthropic.com/v1'),
-      AIProviderModel(id: 'openrouter_vision', name: 'OpenRouter Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://openrouter.ai/api/v1'),
       AIProviderModel(id: 'groq_vision', name: 'Groq Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.groq.com/openai/v1'),
       AIProviderModel(id: 'mistral_vision', name: 'Mistral AI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
+      AIProviderModel(id: 'novita_vision', name: 'Novita AI Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://api.novita.ai/v3/openai'),
       AIProviderModel(id: 'nvidia_nim_vision', name: 'NVIDIA NIM Vision', category: ProviderCategory.vision, requiresApiKey: true, customBaseUrl: 'https://integrate.api.nvidia.com/v1'),
 
-      // --- TTS / AUDIO PROVIDERS ---
+      // --- TTS / AUDIO PROVIDERS (only actually implemented ones) ---
       AIProviderModel(id: 'edge_tts', name: 'Microsoft Edge TTS', category: ProviderCategory.tts, requiresApiKey: false),
-      AIProviderModel(id: 'piper_tts', name: 'Piper TTS (Offline)', category: ProviderCategory.tts, requiresApiKey: false),
+      AIProviderModel(id: 'piper_tts', name: 'Piper TTS (Self-hosted)', category: ProviderCategory.tts, requiresApiKey: false),
       AIProviderModel(id: 'elevenlabs', name: 'ElevenLabs', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.elevenlabs.io/v1'),
-      AIProviderModel(id: 'deepgram', name: 'Deepgram Aura', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.deepgram.com/v1'),
       AIProviderModel(id: 'openai_tts', name: 'OpenAI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
-      AIProviderModel(id: 'google_cloud_tts', name: 'Google Cloud TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://texttospeech.googleapis.com/v1'),
-      AIProviderModel(id: 'mistral_tts', name: 'Mistral AI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
-      AIProviderModel(id: 'nvidia_nim_tts', name: 'NVIDIA NIM TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://integrate.api.nvidia.com/v1'),
     ];
 
     for (var provider in defaultProviders) {
       await _providerBox.put(provider.id, provider);
     }
-    
+
     _loadProviders();
+  }
+
+  /// Removes stale/duplicate provider entries shipped by older app versions
+  /// so the UI never shows dead or duplicated options.
+  Future<void> _cleanupLegacyProviders() async {
+    const legacyIds = [
+      'google_vision', // duplicated gemini_vision
+      'mistral_text', // duplicated mistral
+      'anthropic', // no OpenAI-compatible chat endpoint
+      'anthropic_vision', // no OpenAI-compatible vision endpoint
+      'cohere', // no OpenAI-compatible chat endpoint
+      'huggingface', // not a /chat/completions endpoint
+      'replicate', // no /models listing + non-compatible flow
+      'aws_bedrock', // requires region/ARN, empty base URL
+      'azure_openai', // requires deployment id, empty base URL
+      'deepgram', // TTS not implemented
+      'google_cloud_tts', // TTS not implemented
+      'mistral_tts', // TTS not implemented
+      'nvidia_nim_tts', // TTS not implemented
+    ];
+    final keys = _providerBox.keys
+        .where((key) => legacyIds.contains(key))
+        .toList();
+    if (keys.isNotEmpty) {
+      await _providerBox.deleteAll(keys);
+      _loadProviders();
+    }
   }
 
   /// Notify listeners externally when project data changes.

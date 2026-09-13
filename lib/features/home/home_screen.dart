@@ -9,6 +9,7 @@ import '../../models/ai_provider_model.dart';
 import '../../core/constants.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:collection/collection.dart';
 import '../../services/provider_registry.dart';
 import '../../models/project_model.dart';
 import '../project/screens/project_context_screen.dart';

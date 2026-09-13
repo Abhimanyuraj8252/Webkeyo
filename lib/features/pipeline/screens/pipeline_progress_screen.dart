@@ -117,8 +117,11 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
       // ── Phase 2: AI Scripting ─────────────────────────────────────
       if (_currentPhase == 2) {
         // Connectivity guard — the vision API needs internet.
-        final ConnectivityResult connectivity = await Connectivity().checkConnectivity();
-        if (connectivity == ConnectivityResult.none) {
+        // (connectivity_plus 7.x returns a List for multi-NIC devices.)
+        final List<ConnectivityResult> connectivity =
+            await Connectivity().checkConnectivity();
+        if (connectivity.isEmpty ||
+            connectivity.every((r) => r == ConnectivityResult.none)) {
           throw Exception('No internet connection. Connect to WiFi/mobile data and retry.');
         }
 

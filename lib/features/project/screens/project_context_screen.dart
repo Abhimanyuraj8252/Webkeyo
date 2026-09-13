@@ -16,6 +16,7 @@ import 'package:webkeyo/services/srt_service.dart';
 import 'package:webkeyo/services/tts_service.dart' show mapTtsLanguage, edgeVoicesForLocale;
 import 'package:webkeyo/features/home/model_selector_sheet.dart';
 import 'package:webkeyo/features/pipeline/screens/pipeline_progress_screen.dart';
+import 'package:collection/collection.dart';
 import '../../../features/pipeline/screens/script_editor_screen.dart';
 import '../../../features/pipeline/screens/video_preview_screen.dart';
 import 'character_assignment_screen.dart';

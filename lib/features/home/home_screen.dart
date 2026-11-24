@@ -3,6 +3,9 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'widgets/upload_card.dart';
+import '../prompt_video/prompt_video_screen.dart';
+import '../samples/samples_screen.dart';
+import '../skills/skills_screen.dart';
 import '../settings/settings_screen.dart';
 import '../tools/tools_screen.dart';
 import '../../models/ai_provider_model.dart';
@@ -383,6 +386,49 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ).animate().fadeIn(duration: 200.ms, delay: 100.ms, curve: Curves.easeOutCubic),
 
+              const SizedBox(height: AppConstants.paddingLarge),
+
+              // Make a video — prompt-to-video, skills library, samples
+              Row(
+                children: [
+                  Expanded(
+                    child: _MakeVideoButton(
+                      icon: Icons.movie_creation_outlined,
+                      label: 'Prompt Video',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const PromptVideoScreen()),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: AppConstants.paddingSmall),
+                  Expanded(
+                    child: _MakeVideoButton(
+                      icon: Icons.menu_book_outlined,
+                      label: 'Skills',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const SkillsScreen()),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: AppConstants.paddingSmall),
+                  Expanded(
+                    child: _MakeVideoButton(
+                      icon: Icons.play_circle_outline,
+                      label: 'Samples',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const SamplesScreen()),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ).animate().fadeIn(duration: 200.ms, delay: 150.ms, curve: Curves.easeOutCubic),
+
               const SizedBox(height: AppConstants.paddingXLarge),
 
               // Section Header
@@ -549,6 +595,47 @@ class _HomeScreenState extends State<HomeScreen> {
           tooltip: 'Settings',
         ),
       ],
+    );
+  }
+}
+
+/// A small action button for the "Make a video" row on Home.
+class _MakeVideoButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _MakeVideoButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.cardColor,
+      borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+        child: Container(
+          height: 64,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+            border: Border.all(color: theme.dividerColor),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: theme.colorScheme.primary, size: 24),
+              const SizedBox(height: 2),
+              Text(label, style: GoogleFonts.inter(fontSize: 11, color: theme.colorScheme.primary)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

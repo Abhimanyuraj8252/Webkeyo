@@ -36,7 +36,40 @@ class ProviderRegistry extends ChangeNotifier {
     // If box is empty, initialize with default providers
     if (_providers.isEmpty) {
       await _initializeDefaultProviders();
+    } else {
+      // Existing install: add providers introduced later and fix the
+      // Deepgram name (Aura-2 has no Hindi voices — Flux is the Hindi one).
+      await _ensureNewProviders();
     }
+  }
+
+  /// TTS providers added after the first install (Sarvam / Gemini /
+  /// Deepgram Flux / Fish Audio / MiniMax). Shared by the default list
+  /// and by the migration for existing installs.
+  static final List<AIProviderModel> _newTtsProviders = [
+    AIProviderModel(id: 'sarvam_tts', name: 'Sarvam Bulbul', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.sarvam.ai'),
+    AIProviderModel(id: 'gemini_tts', name: 'Gemini TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://generativelanguage.googleapis.com/v1beta'),
+    AIProviderModel(id: 'fish_audio', name: 'Fish Audio', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.fish.audio/v1'),
+    AIProviderModel(id: 'minimax_tts', name: 'MiniMax TTS (PAID)', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.minimax.io/v1'),
+  ];
+
+  /// Add providers introduced after the first install, and rename
+  /// 'Deepgram Aura' -> 'Deepgram Flux TTS'. Runs on every init; only
+  /// writes when something is missing or wrong.
+  Future<void> _ensureNewProviders() async {
+    var changed = false;
+    final deepgram = _providerBox.get('deepgram');
+    if (deepgram != null && deepgram.name == 'Deepgram Aura') {
+      await _providerBox.put('deepgram', deepgram.copyWith(name: 'Deepgram Flux TTS'));
+      changed = true;
+    }
+    for (final provider in _newTtsProviders) {
+      if (!_providerBox.containsKey(provider.id)) {
+        await _providerBox.put(provider.id, provider);
+        changed = true;
+      }
+    }
+    if (changed) _loadProviders();
   }
 
   void _loadProviders() {
@@ -126,7 +159,8 @@ class ProviderRegistry extends ChangeNotifier {
       AIProviderModel(id: 'edge_tts', name: 'Microsoft Edge TTS', category: ProviderCategory.tts, requiresApiKey: false),
       AIProviderModel(id: 'piper_tts', name: 'Piper TTS (Offline)', category: ProviderCategory.tts, requiresApiKey: false),
       AIProviderModel(id: 'elevenlabs', name: 'ElevenLabs', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.elevenlabs.io/v1'),
-      AIProviderModel(id: 'deepgram', name: 'Deepgram Aura', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.deepgram.com/v1'),
+      AIProviderModel(id: 'deepgram', name: 'Deepgram Flux TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.deepgram.com/v1'),
+      ..._newTtsProviders,
       AIProviderModel(id: 'openai_tts', name: 'OpenAI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
       AIProviderModel(id: 'google_cloud_tts', name: 'Google Cloud TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://texttospeech.googleapis.com/v1'),
       AIProviderModel(id: 'mistral_tts', name: 'Mistral AI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),

@@ -19,8 +19,22 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "8.11.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    id("com.android.application") version "9.3.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.4.20" apply false
+}
+
+// file_picker 8.3.7 compiles against SDK 34, but its transitive dependency
+// flutter_plugin_android_lifecycle requires compileSdk 36 (AGP
+// checkReleaseAarMetadata). Compile file_picker against 36 instead; safe
+// because compileSdk is only a ceiling (minSdk/targetSdk unchanged).
+gradle.beforeProject {
+    if (name == "file_picker") {
+        afterEvaluate {
+            extensions.configure<com.android.build.gradle.LibraryExtension> {
+                compileSdk = 36
+            }
+        }
+    }
 }
 
 include(":app")

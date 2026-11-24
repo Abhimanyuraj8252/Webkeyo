@@ -40,6 +40,19 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // Per-ABI split APKs (v1.2.0): the fat APK was 266 MB. Splitting by
+    // ABI ships one small APK per device — arm64-v8a first, target
+    // ~60-80 MB. Build with: flutter build apk --split-per-abi --release
+    // (each ABI gets its own versionCode suffix automatically).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
+        }
+    }
 }
 
 flutter {

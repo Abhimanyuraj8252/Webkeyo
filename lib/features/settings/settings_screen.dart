@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'providers_screen.dart';
+import 'doc_viewer_screen.dart';
 import '../../core/constants.dart';
 import '../../main.dart';
 
@@ -192,9 +193,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   leading: Icon(Icons.info_outline, color: theme.primaryColor),
                   title: const Text('Webkeyo'),
                   subtitle: Text(
-                    'AI-Powered Manga & Study Video Generator\nVersion 1.0.0',
+                    'AI-Powered Manga & Study Video Generator\nVersion 1.2.0',
                     style: GoogleFonts.inter(fontSize: 12),
                   ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(Icons.privacy_tip_outlined, color: theme.primaryColor),
+                  title: const Text('Privacy Policy'),
+                  subtitle: const Text('What the app stores — almost everything stays on your phone.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DocViewerScreen(
+                          title: 'Privacy Policy',
+                          assetPath: 'assets/docs/PRIVACY.md',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(Icons.description_outlined, color: theme.primaryColor),
+                  title: const Text('Terms of Use'),
+                  subtitle: const Text('Your keys, your content, your responsibility.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DocViewerScreen(
+                          title: 'Terms of Use',
+                          assetPath: 'assets/docs/TERMS.md',
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),

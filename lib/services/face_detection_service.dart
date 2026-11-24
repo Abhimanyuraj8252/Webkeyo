@@ -17,6 +17,18 @@ class FaceDetectionService {
       ),
     );
 
+    // One detector for the whole batch (created once, reused for every
+    // image) and always closed in a `finally` — a failed image or a
+    // thrown error must not leak the native detector.
+    try {
+      return await _extractFaces(faceDetector, imagePaths);
+    } finally {
+      await faceDetector.close();
+    }
+  }
+
+  static Future<List<String>> _extractFaces(
+      FaceDetector faceDetector, List<String> imagePaths) async {
     final List<String> extractedFacePaths = [];
     final tempDir = await getTemporaryDirectory();
     final outDir = Directory(p.join(tempDir.path, 'extracted_faces_${DateTime.now().millisecondsSinceEpoch}'));
@@ -76,7 +88,6 @@ class FaceDetectionService {
       }
     }
 
-    faceDetector.close();
     return extractedFacePaths;
   }
 }

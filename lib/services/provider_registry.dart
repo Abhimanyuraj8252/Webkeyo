@@ -44,13 +44,17 @@ class ProviderRegistry extends ChangeNotifier {
   }
 
   /// TTS providers added after the first install (Sarvam / Gemini /
-  /// Deepgram Flux / Fish Audio / MiniMax). Shared by the default list
-  /// and by the migration for existing installs.
+  /// Deepgram Flux / Fish Audio / MiniMax, then v1.2.0: Polly /
+  /// Speechify / Azure). Shared by the default list and by the
+  /// migration for existing installs.
   static final List<AIProviderModel> _newTtsProviders = [
     AIProviderModel(id: 'sarvam_tts', name: 'Sarvam Bulbul', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.sarvam.ai'),
     AIProviderModel(id: 'gemini_tts', name: 'Gemini TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://generativelanguage.googleapis.com/v1beta'),
     AIProviderModel(id: 'fish_audio', name: 'Fish Audio', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.fish.audio/v1'),
     AIProviderModel(id: 'minimax_tts', name: 'MiniMax TTS (PAID)', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.minimax.io/v1'),
+    AIProviderModel(id: 'amazon_polly', name: 'Amazon Polly (Standard)', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://polly.ap-south-1.amazonaws.com'),
+    AIProviderModel(id: 'speechify', name: 'Speechify Simba', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.speechify.ai/v1'),
+    AIProviderModel(id: 'azure_speech', name: 'Azure AI Speech', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://centralindia.tts.speech.microsoft.com'),
   ];
 
   /// Add providers introduced after the first install, and rename
@@ -61,6 +65,22 @@ class ProviderRegistry extends ChangeNotifier {
     final deepgram = _providerBox.get('deepgram');
     if (deepgram != null && deepgram.name == 'Deepgram Aura') {
       await _providerBox.put('deepgram', deepgram.copyWith(name: 'Deepgram Flux TTS'));
+      changed = true;
+    }
+    // OpenAI TTS shut down 6 Jan 2027 (tts-1 / gpt-4o-mini-tts) — the
+    // provider stays visible so existing setups are not silently lost,
+    // but its name says so and synthesis now refuses with a clear error.
+    final openAiTts = _providerBox.get('openai_tts');
+    if (openAiTts != null && openAiTts.name == 'OpenAI TTS') {
+      await _providerBox.put(
+          'openai_tts', openAiTts.copyWith(name: 'OpenAI TTS (shut down 6 Jan 2027)'));
+      changed = true;
+    }
+    // Google Cloud TTS is WaveNet-first (4M chars/month free tier).
+    final gcp = _providerBox.get('google_cloud_tts');
+    if (gcp != null && gcp.name == 'Google Cloud TTS') {
+      await _providerBox.put(
+          'google_cloud_tts', gcp.copyWith(name: 'Google Cloud TTS (WaveNet)'));
       changed = true;
     }
     for (final provider in _newTtsProviders) {
@@ -161,8 +181,7 @@ class ProviderRegistry extends ChangeNotifier {
       AIProviderModel(id: 'elevenlabs', name: 'ElevenLabs', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.elevenlabs.io/v1'),
       AIProviderModel(id: 'deepgram', name: 'Deepgram Flux TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.deepgram.com/v1'),
       ..._newTtsProviders,
-      AIProviderModel(id: 'openai_tts', name: 'OpenAI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.openai.com/v1'),
-      AIProviderModel(id: 'google_cloud_tts', name: 'Google Cloud TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://texttospeech.googleapis.com/v1'),
+      AIProviderModel(id: 'google_cloud_tts', name: 'Google Cloud TTS (WaveNet)', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://texttospeech.googleapis.com/v1'),
       AIProviderModel(id: 'mistral_tts', name: 'Mistral AI TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://api.mistral.ai/v1'),
       AIProviderModel(id: 'nvidia_nim_tts', name: 'NVIDIA NIM TTS', category: ProviderCategory.tts, requiresApiKey: true, customBaseUrl: 'https://integrate.api.nvidia.com/v1'),
     ];

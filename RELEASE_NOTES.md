@@ -1,3 +1,37 @@
+# Webkeyo v1.2.0 — Release Notes
+
+## What's new
+
+### New voice providers (Settings → AI Providers → TTS)
+- **Google Cloud TTS WaveNet** — completed. 4M chars/month free (Standard + WaveNet), then ~₹17/hr. Default voices hi-IN-Wavenet-A (F) / hi-IN-Wavenet-C (M). Billing/card must be enabled on the Google Cloud project even for free use.
+- **Amazon Polly Standard** — 5M chars/month free, first 12 months only, then ~₹17/hr. AWS SigV4 signing built in (Access Key ID + Secret + region, default ap-south-1). Voices Aditi / Kajal (female); no male Hindi Standard voice verified.
+- **Speechify Simba** — 500K chars/month free (~10 hrs/month); Starter $10/month = 2M chars (~₹21/hr effective). Model picker: simba-3.5 (48 languages incl. Hindi) / simba-3.2 (English-only — use 3.5 for Hindi).
+- **Azure AI Speech** — 0.5M neural chars/month free (~10 hrs/month). SwaraNeural has REAL emotion styles (cheerful, empathetic, newscast) via SSML.
+- **Gemini TTS** updated to `gemini-2.5-flash-tts` (the preview model shuts down 18 Dec 2026). Google publishes no per-project free-tier request limits — treat it as previews / short clips only; the app no longer claims hours for it.
+- **OpenAI TTS removed**: tts-1 / gpt-4o-mini-tts shut down 6 Jan 2027. The app now refuses with a clear message instead of calling a dead API.
+
+### Onboarding + first run
+- 3-step onboarding: what it does → pick a voice → render a short demo (free, no key) or jump into a sample story (Haunted Night). Skippable, shown once.
+
+### One-tap reels & retention
+- One-tap reel templates (the 10 styles as named templates), "Trending this week" (local JSON per release), karaoke-style word-highlight captions (.ass), one-tap share to YouTube / Instagram (caption + hashtags copied), daily creation streak + achievements + creator levels (XP per export), remix/duplicate project as template, local daily reminder.
+
+### Fundable must-haves
+- MIT LICENSE, CHANGELOG.md, PRIVACY.md + TERMS.md (linked in-app under Settings → About), GitHub Actions CI (analyze + test), PITCH.md, rewritten README (cost table, roadmap, APK badge), store/ assets (feature graphic + Play Store descriptions; screenshots are labelled placeholders until real captures are taken), landing-page content (`docs/landing-page.md`), BillingService stub + Hive usage counter for a future paid tier (no charges today), Sentry crash reporting (free tier, off unless a DSN is passed at build time).
+
+### Performance (reference device: ₹20–25k phone, 6 GB RAM, Dimensity 900)
+- FFmpeg renders: progress notification + Cancel button (cancels the in-flight session, cleans up intermediates).
+- `Image.file` decodes at display size in lists; home screen split into small widgets; FaceDetector created once and closed in `finally`; splash screen + startup timeouts (never a black screen); skeleton/shimmer loading for home lists.
+- Per-ABI split APKs configured (`--split-per-abi`, arm64-v8a first, target ~60–80 MB — the v1.1.0 fat APK was 266 MB). **APK not rebuilt yet in this release cycle — see Notes.**
+
+## Notes
+- **APK rebuild is the next step (parent authorizes it):** `flutter build apk --split-per-abi --release`. The v1.1.0 APK (`build/app/outputs/flutter-apk/app-release.apk`, 266 MB, versionCode 2, debug-signed) is still the file on disk — do not ship it as v1.2.0.
+- New provider clients (Polly, Speechify, Azure) are implemented but NOT live-tested here (no API key was used). They throw a clear error if the key/voice/region is missing — they never write silence as a voiceover.
+- No gTTS anywhere in the app. No hardcoded API keys. No paid services, no server/backend.
+- Template marketplace and cloud sync are deferred (they need a backend).
+
+---
+
 # Webkeyo v1.1.0 — Release Notes
 
 ## What's new

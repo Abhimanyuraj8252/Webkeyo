@@ -5,21 +5,50 @@ import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:image/image.dart' as img;
 
+import 'render_notification_service.dart';
+
+/// Cancel a running render. Checked between scenes; the in-flight
+/// FFmpeg session is also cancelled via FFmpegKit.cancel().
+class RenderCancellation {
+  bool _cancelled = false;
+  bool get isCancelled => _cancelled;
+  void cancel() => _cancelled = true;
+}
+
+/// Thrown when the user cancels a render. Callers treat this as a
+/// clean stop (not an error).
+class RenderCancelledException implements Exception {
+  const RenderCancelledException();
+  @override
+  String toString() => 'Render cancelled by the user.';
+}
+
 /// Advanced FFmpeg rendering service.
 /// Processes segmented scene generation and combination to prevent OOM errors
 /// on mobile devices, applying a cinematic Ken Burns effect to static images.
+///
+/// NOTE on isolates: FFmpegKit.execute runs the encoder natively — the
+/// Dart await never blocks the UI thread. What the UI used to lack was
+/// (a) a way to cancel and (b) progress outside the app. Both are added
+/// here: [RenderCancellation] + a progress notification.
 class FfmpegService {
+  final RenderNotification _notification = RenderNotification();
+
   /// Renders a full video by generating intermediate scene mp4s and concatenating them.
   ///
   /// [syncData] expects maps with 'image_path', 'audio_path', and 'duration_in_seconds'.
   /// [outputDirectory] is the root directory to store the final output.
   /// [projectName] is used for creating unique project folders and file names.
   /// [onProgress] returns a 0.0 to 1.0 double indicating overall rendering progress.
+  /// [cancellation] lets the UI stop the render between scenes.
+  /// [showNotification] shows a render-progress notification (default on).
   Future<String?> renderFinalVideo({
     required List<Map<String, dynamic>> syncData,
     required String outputDirectory,
     required String projectName,
     required Function(double) onProgress,
+    RenderCancellation? cancellation,
+    bool showNotification = true,
   }) async {
     // Force export to public Movies directory on Android
     final String publicExportDir = '/storage/emulated/0/Movies/Webkeyo';
@@ -45,6 +74,11 @@ class FfmpegService {
     try {
       // Step A & B & C: Loop through syncData and render each scene
       for (int i = 0; i < totalScenes; i++) {
+        if (cancellation?.isCancelled == true) {
+          await FFmpegKit.cancel();
+          if (showNotification) await _notification.hide();
+          throw const RenderCancelledException();
+        }
         final sceneData = syncData[i];
         final String imagePath = sceneData['image_path'];
         final String audioPath = sceneData['audio_path'];
@@ -109,7 +143,11 @@ class FfmpegService {
         }
 
         // Report progress (reserving 10% for the final concatenation step)
-        onProgress((i + 1) / totalScenes * 0.9);
+        final progress = (i + 1) / totalScenes * 0.9;
+        onProgress(progress);
+        if (showNotification) {
+          await _notification.showProgress(progress, projectName);
+        }
       }
 
       // Step D: Generate concat.txt
@@ -144,6 +182,9 @@ class FfmpegService {
       }
 
       onProgress(1.0); // 100% complete
+      if (showNotification) {
+        await _notification.showDone(finalVideoPath);
+      }
 
       // Step F: Cleanup intermediate assets to immediately free up user storage
       _cleanupIntermediateFiles(intermediateFiles, concatFile);
@@ -151,6 +192,7 @@ class FfmpegService {
       return finalVideoPath;
     } catch (e, stacktrace) {
       debugPrint("Fatal Error rendering final video: $e\\n$stacktrace");
+      if (showNotification) await _notification.hide();
       // Attempt cleanup on failure so we don't leave massive temporary .mp4s
       _cleanupIntermediateFiles(intermediateFiles, File(p.join(projectDir, 'concat.txt')));
       rethrow;

@@ -300,7 +300,13 @@ class _ProjectContextScreenState extends State<ProjectContextScreen>
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: imgFile.existsSync()
-                            ? Image.file(imgFile, fit: BoxFit.cover)
+                            ? Image.file(
+                                imgFile,
+                                fit: BoxFit.cover,
+                                // 90px wide thumbnail — decode at 2x, not full-res.
+                                cacheWidth: 180,
+                                cacheHeight: 180,
+                              )
                             : const Icon(Icons.broken_image_outlined),
                       );
                     },

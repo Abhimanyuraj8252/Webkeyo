@@ -146,6 +146,9 @@ class _CharacterAssignmentScreenState extends State<CharacterAssignmentScreen> {
                       File(assignment.faceImagePath),
                       width: 100,
                       height: 100,
+                      // 100x100 display — decode at 2x for retina, not full-res.
+                      cacheWidth: 200,
+                      cacheHeight: 200,
                       fit: BoxFit.cover,
                     ),
                   ),

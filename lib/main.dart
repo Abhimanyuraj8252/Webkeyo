@@ -2,9 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/theme.dart';
 import 'features/home/home_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
+import 'services/billing_service.dart';
+import 'services/engagement_service.dart';
 import 'services/provider_registry.dart';
 
 /// Global theme state management using Hive for persistence.
@@ -34,31 +39,186 @@ class ThemeNotifier extends ChangeNotifier {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Sentry crash reporting (free tier) is OFF unless a DSN is passed
+  // at build time: flutter build apk --dart-define=SENTRY_DSN=https://...
+  // No DSN is ever hardcoded. The app works fully without it.
+  const sentryDsn = String.fromEnvironment('SENTRY_DSN', defaultValue: '');
+  if (sentryDsn.isNotEmpty) {
+    await SentryFlutter.init(
+      (options) {
+        options.dsn = sentryDsn;
+        options.tracesSampleRate = 0.2;
+      },
+      appRunner: () => runApp(const AppRoot()),
+    );
+  } else {
+    runApp(const AppRoot());
+  }
+}
 
-  // Initialize local storage
-  await Hive.initFlutter();
+/// Root widget: shows a splash screen immediately (never a black
+/// screen), boots the local services in the background with timeouts,
+/// then shows onboarding on first run or the home screen.
+class AppRoot extends StatefulWidget {
+  const AppRoot({super.key});
 
-  // Initialize provider registry
-  final providerRegistry = ProviderRegistry();
-  await providerRegistry.init();
+  @override
+  State<AppRoot> createState() => _AppRootState();
+}
 
-  // Initialize theme
-  final themeNotifier = ThemeNotifier();
-  await themeNotifier.init();
+enum _BootState { loading, ready, failed }
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: providerRegistry),
-        ChangeNotifierProvider.value(value: themeNotifier),
-      ],
-      child: const GlobalMediaApp(),
-    ),
-  );
+class _AppRootState extends State<AppRoot> {
+  _BootState _state = _BootState.loading;
+  String _bootLabel = 'Starting Webkeyo…';
+  String? _bootError;
+  ProviderRegistry? _providerRegistry;
+  ThemeNotifier? _themeNotifier;
+  bool _showOnboarding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    // Each step gets its own timeout — a slow disk or a stuck Hive box
+    // must never leave the user on a black screen.
+    try {
+      setState(() => _bootLabel = 'Opening local storage…');
+      await Hive.initFlutter().timeout(const Duration(seconds: 10));
+
+      setState(() => _bootLabel = 'Loading providers…');
+      final registry = ProviderRegistry();
+      await registry.init().timeout(const Duration(seconds: 15));
+
+      setState(() => _bootLabel = 'Loading theme…');
+      final themeNotifier = ThemeNotifier();
+      await themeNotifier.init().timeout(const Duration(seconds: 10));
+
+      setState(() => _bootLabel = 'Loading usage & streaks…');
+      final billing = BillingService();
+      await billing.init().timeout(const Duration(seconds: 10));
+      final engagement = EngagementService();
+      await engagement.init().timeout(const Duration(seconds: 10));
+
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(seconds: 10));
+      final done = prefs.getBool('webkeyo_onboarding_done') ?? false;
+
+      if (!mounted) return;
+      setState(() {
+        _providerRegistry = registry;
+        _themeNotifier = themeNotifier;
+        _showOnboarding = !done;
+        _state = _BootState.ready;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _bootError = e.toString();
+        _state = _BootState.failed;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_state) {
+      case _BootState.loading:
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.darkTheme,
+          home: _SplashScreen(label: _bootLabel),
+        );
+      case _BootState.failed:
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.darkTheme,
+          home: _BootFailedScreen(
+            error: _bootError ?? 'Unknown error',
+            onRetry: () {
+              setState(() {
+                _state = _BootState.loading;
+                _bootError = null;
+              });
+              _boot();
+            },
+          ),
+        );
+      case _BootState.ready:
+        return MultiProvider(
+          providers: [
+            ChangeNotifierProvider.value(value: _providerRegistry!),
+            ChangeNotifierProvider.value(value: _themeNotifier!),
+          ],
+          child: GlobalMediaApp(showOnboarding: _showOnboarding),
+        );
+    }
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  final String label;
+  const _SplashScreen({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.movie_creation_outlined, size: 72),
+            const SizedBox(height: 16),
+            Text(
+              'Webkeyo',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(label),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BootFailedScreen extends StatelessWidget {
+  final String error;
+  final VoidCallback onRetry;
+  const _BootFailedScreen({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 64),
+              const SizedBox(height: 16),
+              const Text('Webkeyo could not start.'),
+              const SizedBox(height: 8),
+              Text(error, textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class GlobalMediaApp extends StatefulWidget {
-  const GlobalMediaApp({super.key});
+  final bool showOnboarding;
+  const GlobalMediaApp({super.key, this.showOnboarding = false});
 
   @override
   State<GlobalMediaApp> createState() => _GlobalMediaAppState();
@@ -98,7 +258,9 @@ class _GlobalMediaAppState extends State<GlobalMediaApp> {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeNotifier.themeMode,
-      home: const HomeScreen(),
+      home: widget.showOnboarding
+          ? const OnboardingScreen()
+          : const HomeScreen(),
     );
   }
 }

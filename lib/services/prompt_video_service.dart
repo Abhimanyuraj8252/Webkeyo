@@ -47,6 +47,9 @@ class PromptVideoResult {
   final String styleId;
   final bool vertical;
 
+  /// Karaoke .ass path — only when karaoke captions were requested.
+  final String? karaokePath;
+
   const PromptVideoResult({
     required this.videoPath,
     required this.srtPath,
@@ -55,6 +58,7 @@ class PromptVideoResult {
     required this.durationSeconds,
     required this.styleId,
     required this.vertical,
+    this.karaokePath,
   });
 }
 
@@ -200,6 +204,7 @@ Future<PromptVideoResult> renderPromptVideo({
   required String outDir,
   required TtsService tts,
   void Function(PromptVideoProgress progress)? onProgress,
+  bool karaoke = false,
 }) async {
   final style = getVideoStyle(styleId);
   final width = vertical ? 720 : 1280;
@@ -303,9 +308,14 @@ Future<PromptVideoResult> renderPromptVideo({
       '-c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y "$videoPath"',
       'final mux');
 
-  // --- SRT + thumbnail ---
+  // --- SRT + karaoke + thumbnail ---
   final srtPath = '${dir.path}/video.srt';
   await writeSrt(scenes, srtPath);
+  String? karaokePath;
+  if (karaoke) {
+    karaokePath = '${dir.path}/video_karaoke.ass';
+    await writeKaraokeAss(scenes, karaokePath);
+  }
   final thumbPath = '${dir.path}/thumbnail.png';
   await generateThumbnail(
       title: prompt, styleId: styleId, outPath: thumbPath, label: genre);
@@ -319,6 +329,7 @@ Future<PromptVideoResult> renderPromptVideo({
     durationSeconds: totalSeconds,
     styleId: styleId,
     vertical: vertical,
+    karaokePath: karaokePath,
   );
 }
 

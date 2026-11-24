@@ -73,6 +73,7 @@ class CharacterVoice {
 const String _elevenPlaceholder = 'REPLACE_WITH_ELEVENLABS_VOICE_ID';
 const String _fishPlaceholder = 'REPLACE_WITH_FISH_AUDIO_VOICE_ID';
 const String _minimaxPlaceholder = 'REPLACE_WITH_MINIMAX_VOICE_ID';
+const String _speechifyPlaceholder = 'REPLACE_WITH_SPEECHIFY_VOICE_ID';
 
 const CharacterVoice narratorVoice = CharacterVoice(
   name: 'Narrator',
@@ -84,12 +85,15 @@ const CharacterVoice narratorVoice = CharacterVoice(
     'sarvam_tts': 'Meera',
     'gemini_tts': 'Aoede',
     'elevenlabs': _elevenPlaceholder,
-    'google_cloud_tts': 'hi-IN-Neural2-D',
+    'google_cloud_tts': 'hi-IN-Wavenet-A',
     'piper_tts': 'female', // Priyamvada
     'edge_tts': 'hi-IN-SwaraNeural',
     'deepgram': 'flux-anjali-hi',
     'fish_audio': _fishPlaceholder,
     'minimax_tts': _minimaxPlaceholder,
+    'amazon_polly': 'Aditi',
+    'azure_speech': 'hi-IN-SwaraNeural',
+    'speechify': _speechifyPlaceholder,
   },
 );
 
@@ -103,12 +107,18 @@ const CharacterVoice arjunVoice = CharacterVoice(
     'sarvam_tts': 'Shubh',
     'gemini_tts': 'Fenrir',
     'elevenlabs': _elevenPlaceholder,
-    'google_cloud_tts': 'hi-IN-Neural2-B',
+    'google_cloud_tts': 'hi-IN-Wavenet-C',
     'piper_tts': 'male', // Pratham
     'edge_tts': 'hi-IN-MadhurNeural',
     'deepgram': 'flux-arjun-hi',
     'fish_audio': _fishPlaceholder,
     'minimax_tts': _minimaxPlaceholder,
+    // Polly has NO verified male Hindi Standard voice — Aditi is the
+    // female fallback so the pipeline never crashes; verify the Neural
+    // voice Arjun in the AWS console first for a real male voice.
+    'amazon_polly': 'Aditi',
+    'azure_speech': 'hi-IN-MadhurNeural',
+    'speechify': _speechifyPlaceholder,
   },
 );
 
@@ -122,12 +132,15 @@ const CharacterVoice titliVoice = CharacterVoice(
     'sarvam_tts': 'Ishita',
     'gemini_tts': 'Leda',
     'elevenlabs': _elevenPlaceholder,
-    'google_cloud_tts': 'hi-IN-Neural2-A',
+    'google_cloud_tts': 'hi-IN-Wavenet-D',
     'piper_tts': 'female', // Priyamvada
     'edge_tts': 'hi-IN-SwaraNeural',
     'deepgram': 'flux-divya-hi',
     'fish_audio': _fishPlaceholder,
     'minimax_tts': _minimaxPlaceholder,
+    'amazon_polly': 'Kajal',
+    'azure_speech': 'hi-IN-SwaraNeural',
+    'speechify': _speechifyPlaceholder,
   },
 );
 
@@ -149,12 +162,15 @@ CharacterVoice _genderFallback(String gender) {
         'sarvam_tts': 'Arjun',
         'gemini_tts': 'Charon',
         'elevenlabs': _elevenPlaceholder,
-        'google_cloud_tts': 'hi-IN-Neural2-B',
+        'google_cloud_tts': 'hi-IN-Wavenet-B',
         'piper_tts': 'male',
         'edge_tts': 'hi-IN-MadhurNeural',
         'deepgram': 'flux-rahul-hi',
         'fish_audio': _fishPlaceholder,
         'minimax_tts': _minimaxPlaceholder,
+        'amazon_polly': 'Aditi',
+        'azure_speech': 'hi-IN-MadhurNeural',
+        'speechify': _speechifyPlaceholder,
       },
     );
   }
@@ -168,12 +184,15 @@ CharacterVoice _genderFallback(String gender) {
       'sarvam_tts': 'Ritu',
       'gemini_tts': 'Aoede',
       'elevenlabs': _elevenPlaceholder,
-      'google_cloud_tts': 'hi-IN-Neural2-D',
+      'google_cloud_tts': 'hi-IN-Wavenet-D',
       'piper_tts': 'female',
       'edge_tts': 'hi-IN-SwaraNeural',
       'deepgram': 'flux-ritu-hi',
       'fish_audio': _fishPlaceholder,
       'minimax_tts': _minimaxPlaceholder,
+      'amazon_polly': 'Aditi',
+      'azure_speech': 'hi-IN-SwaraNeural',
+      'speechify': _speechifyPlaceholder,
     },
   );
 }

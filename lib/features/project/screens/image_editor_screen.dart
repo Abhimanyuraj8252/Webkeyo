@@ -122,6 +122,9 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                                 Image.file(
                                   File(originalImages[index]),
                                   height: 200,
+                                  // 200px tall in the list — decode at 2x, not full-res.
+                                  cacheWidth: 400,
+                                  cacheHeight: 400,
                                   fit: BoxFit.contain,
                                 ),
                                 const SizedBox(height: 8),
@@ -167,6 +170,9 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                             clipBehavior: Clip.antiAlias,
                             child: Image.file(
                               File(editedImages[index]),
+                              // Grid cell — decode at 2x cell size, not full-res.
+                              cacheWidth: 400,
+                              cacheHeight: 400,
                               fit: BoxFit.cover,
                             ),
                           ),

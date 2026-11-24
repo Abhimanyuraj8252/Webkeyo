@@ -15,6 +15,34 @@ shown in the app at Home → **Skills**.
 Status: **In this app** = working code in this repo. **Starter** = exporter /
 snippet, documented, not a full install. **Guide** = documented recipe only.
 
+## v1.2.0 additions (24 Nov 2026) — providers & features, not new skills
+
+The 31-skill count above is unchanged: these are new **voice providers** and
+**app features**, not new pipeline skills.
+
+- **Amazon Polly Standard** (Settings → AI Providers → TTS): 5M chars/month
+  free, first 12 months only, then ~₹17/hr. AWS SigV4 signing built in
+  (Access Key ID + Secret + region, default ap-south-1). Voices Aditi /
+  Kajal (female); no male Hindi Standard voice verified. NOT live-tested
+  here (no key was used).
+- **Speechify Simba** (Settings → AI Providers → TTS): 500K chars/month
+  free (~10 hrs/month); Starter $10/month = 2M chars (~₹21/hr effective).
+  Model picker: simba-3.5 (48 languages incl. Hindi) / simba-3.2
+  (English-only — use 3.5 for Hindi). NOT live-tested here.
+- **Azure AI Speech** (Settings → AI Providers → TTS): 0.5M neural
+  chars/month free (~10 hrs/month). SwaraNeural has REAL emotion styles
+  (cheerful, empathetic, newscast) via SSML. NOT live-tested here.
+- **Google Cloud TTS** is now WaveNet-first (defaults hi-IN-Wavenet-A /
+  hi-IN-Wavenet-C); **Gemini TTS** now uses `gemini-2.5-flash-tts` and the
+  app no longer claims hours for its free tier (Google publishes no
+  per-project request limits — previews / short clips only).
+- **OpenAI TTS removed**: tts-1 / gpt-4o-mini-tts shut down 6 Jan 2027.
+- **Karaoke captions**: word-by-word highlight `.ass` sidecar (+ FFmpeg
+  burn-in) on the Prompt Video screen. **One-tap reel templates** (10),
+  **Trending this week** (local JSON), **streaks / achievements / XP**,
+  **remix** (duplicate project), **one-tap share** (caption + hashtags
+  copied), **3-step onboarding**, **per-ABI split APKs** (arm64-v8a first).
+
 ---
 
 ## Script (3)
@@ -72,11 +100,11 @@ snippet, documented, not a full install. **Guide** = documented recipe only.
 - **Does NOT do:** Not free forever — ₹100 covers ~50,000 chars (~40 min). A 2-hour video costs ~₹300.
 
 ### 7. Gemini TTS (`voice_providers.dart`) — In this app
-- **What:** Gemini API TTS, 30 prebuilt voices, Hindi listed, `[laughs]`/`[whispers]` audio tags, style prompt carries the emotion.
-- **Cost:** Free of charge on the free tier (Google AI Studio, checked 24 Nov 2026).
+- **What:** Gemini API TTS, 30 prebuilt voices, Hindi listed, `[laughs]`/`[whispers]` audio tags, style prompt carries the emotion. Model is now `gemini-2.5-flash-tts` (the preview model shuts down 18 Dec 2026).
+- **Cost:** Free of charge on the free tier (Google AI Studio, checked 24 Nov 2026) — BUT Google does NOT publish the per-project request limits. Published rate-limit tables report ~3 RPM / 10 requests per day for 2.5 Flash TTS. Treat as previews / short clips only; do NOT plan hours of narration on it.
 - **Install:** Key needed: paste in Settings (AI Providers > TTS > Gemini TTS).
 - **Mobile:** Yes. Cloud API — nothing runs on the phone.
-- **Use when:** Free emotional voice when Sarvam credits run out.
+- **Use when:** Free emotional voice for a short clip or preview.
 - **Does NOT do:** Not unlimited — free-tier rate limits are unpublished.
 
 ### 8. Deepgram Flux TTS (`voice_providers.dart`) — In this app
@@ -112,8 +140,8 @@ snippet, documented, not a full install. **Guide** = documented recipe only.
 - **Does NOT do:** NO commercial licence on the Free plan — must not be used on a monetised video. ~10 min/month only.
 
 ### 12. Google Cloud TTS (built-in) — volume fallback — In this app
-- **What:** 46 Hindi voices, emotion via SSML prosody (rate + pitch).
-- **Cost:** 4M chars/month Standard/WaveNet, 1M Chirp 3 HD / Neural2 free — BUT billing must be enabled (check the pricing page).
+- **What:** 46 Hindi voices, emotion via SSML prosody (rate + pitch). WaveNet-first since v1.2.0: defaults hi-IN-Wavenet-A (female narrator) / hi-IN-Wavenet-C (male).
+- **Cost:** 4M chars/month Standard/WaveNet, 1M Chirp 3 HD / Neural2 free — BUT billing must be enabled (check the pricing page). Paid rate ~₹17/hr (WaveNet $4/1M chars).
 - **Install:** Key needed + billing enabled on the Google Cloud project.
 - **Mobile:** Yes. Cloud API.
 - **Use when:** Only when the other providers are unavailable and billing is already on.

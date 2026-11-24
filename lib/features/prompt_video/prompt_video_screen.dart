@@ -13,14 +13,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/constants.dart';
 import '../../models/ai_provider_model.dart';
 import '../../models/video_style.dart';
+import '../../services/engagement_service.dart';
 import '../../services/prompt_video_service.dart';
+import '../../services/provider_credentials.dart';
 import '../../services/provider_registry.dart';
 import '../../services/script_generator.dart';
+import '../../services/share_service.dart';
 import '../../services/tts_service.dart';
 
 class PromptVideoScreen extends StatefulWidget {
@@ -44,6 +46,7 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
   String _genre = defaultGenre;
   String _style = 'cinematic-dark';
   bool _vertical = true;
+  bool _karaoke = false;
   bool _busy = false;
   String _progressLabel = '';
   double _progress = 0;
@@ -87,12 +90,20 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
       _progressLabel = 'Starting…';
     });
     try {
-      // Voiceover provider: first enabled TTS provider, else Edge TTS
-      // (free, no key). Keys come only from Settings — never hardcoded.
+      // Voiceover provider: the onboarding pick first (if enabled),
+      // then the first enabled TTS provider, else Edge TTS (free, no
+      // key). Keys come only from Settings — never hardcoded.
       final registry = context.read<ProviderRegistry>();
       final ttsProviders =
           registry.getProvidersByCategory(ProviderCategory.tts);
-      AIProviderModel? provider = ttsProviders
+      AIProviderModel? provider;
+      final storedDefault = await DefaultTtsProvider.load();
+      if (storedDefault != null) {
+        provider = ttsProviders
+            .where((p) => p.id == storedDefault && p.isEnabled)
+            .firstOrNull;
+      }
+      provider ??= ttsProviders
           .where((p) => p.isEnabled)
           .firstOrNull;
       provider ??= ttsProviders.where((p) => p.id == 'edge_tts').firstOrNull;
@@ -115,6 +126,7 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
         outDir: outDir,
         tts: tts,
         vertical: _vertical,
+        karaoke: _karaoke,
         onProgress: (progress) {
           if (mounted) {
             setState(() {
@@ -129,6 +141,20 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
         _result = result;
         _busy = false;
       });
+      // A finished export counts toward the streak / XP (+100). Never
+      // let the counter break the render flow.
+      try {
+        final engagement = EngagementService();
+        await engagement.init();
+        final unlocked = await engagement.recordExport();
+        if (mounted && unlocked.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Achievement unlocked: ${unlocked.join(', ')} 🎉')),
+          );
+        }
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -202,6 +228,13 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
                 ],
               ),
               const SizedBox(height: AppConstants.paddingSmall),
+              SwitchListTile(
+                title: const Text('Karaoke captions'),
+                subtitle: const Text(
+                    'Word-by-word highlight captions (.ass) next to the video — burn them in with FFmpeg for Reels/Shorts.'),
+                value: _karaoke,
+                onChanged: (v) => setState(() => _karaoke = v),
+              ),
               Text(
                 'Length follows the script — each scene runs as long as its narration (Hindi audio runs ~1.3× the written line).',
                 style: theme.textTheme.bodySmall,
@@ -230,8 +263,10 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
               Text(
                 'Voiceover uses the TTS provider set in Settings (AI Providers > TTS). '
                 'No key set yet? Edge TTS is free and built in. '
-                'Sarvam (₹100 free credit) is the default Hindi voice; '
-                'Deepgram Flux gives a \$200 free credit with Hindi voices.',
+                'Free tiers (official pricing pages, 24 Nov 2026): Google Cloud WaveNet 4M chars/month, '
+                'Amazon Polly 5M/month (first 12 months), Speechify 500K/month, '
+                'Azure SwaraNeural 0.5M/month with real emotion styles, '
+                'Deepgram Flux \$200 free credit with Hindi voices.',
                 style: theme.textTheme.bodySmall,
               ),
             ],
@@ -288,14 +323,27 @@ class _PromptVideoScreenState extends State<PromptVideoScreen> {
         const SizedBox(height: AppConstants.paddingSmall),
         _pathRow(theme, 'Video', videoPath),
         _pathRow(theme, 'Subtitles', srtPath),
+        if (_result!.karaokePath != null)
+          _pathRow(theme, 'Karaoke', _result!.karaokePath!),
         const SizedBox(height: AppConstants.paddingMedium),
         Row(
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: () => SharePlus.instance.share(
-                  ShareParams(files: [XFile(videoPath)], text: title),
-                ),
+                onPressed: () async {
+                  final ok = await ShareService.shareVideo(
+                    videoPath: videoPath,
+                    title: title,
+                  );
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(ok
+                          ? 'Caption + hashtags copied — paste them in YouTube / Instagram.'
+                          : 'Video file not found.'),
+                    ),
+                  );
+                },
                 icon: const Icon(Icons.share),
                 label: const Text('Share video'),
               ),

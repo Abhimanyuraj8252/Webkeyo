@@ -36,6 +36,7 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
   int _currentPhase = 1;
   String _statusMessage = 'Initializing...';
   bool _hasError = false;
+  final RenderCancellation _renderCancellation = RenderCancellation();
 
   final List<String> _phases = [
     'Extracting Images',
@@ -244,6 +245,7 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
           syncData: finalSyncData,
           outputDirectory: tempDir.path,
           projectName: widget.projectId,
+          cancellation: _renderCancellation,
           onProgress: (progress) {
             if (mounted) {
               setState(
@@ -269,6 +271,15 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
       }
     } catch (e) {
       if (mounted) {
+        // A user cancel is a clean stop, not an error — the project
+        // stays and can be re-run.
+        if (e is RenderCancelledException) {
+          setState(() {
+            _statusMessage = 'Render cancelled. You can re-run the pipeline any time.';
+            _hasError = false;
+          });
+          return;
+        }
         // Update project status to error
         try {
           final registry = Provider.of<ProviderRegistry>(context, listen: false);
@@ -372,6 +383,21 @@ class _PipelineProgressScreenState extends State<PipelineProgressScreen> {
               ),
             ),
             // Action buttons
+            // Cancel is only shown while FFmpeg is rendering (phase 5).
+            // It stops the render between scenes and cleans up the
+            // intermediate files — the project stays, so it can be
+            // re-run.
+            if (!_hasError && _currentPhase == 5)
+              OutlinedButton.icon(
+                onPressed: () {
+                  _renderCancellation.cancel();
+                  if (mounted) {
+                    setState(() => _statusMessage = 'Cancelling render…');
+                  }
+                },
+                icon: const Icon(Icons.cancel_outlined),
+                label: const Text('Cancel render'),
+              ),
             if (_hasError)
               Column(
                 children: [

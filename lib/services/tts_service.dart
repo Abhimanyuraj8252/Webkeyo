@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 import 'character_voices.dart';
+import 'provider_credentials.dart';
 import 'voice_providers.dart';
 
 /// Service responsible for communicating with external TTS APIs, downloading audio,
@@ -90,12 +91,6 @@ class TtsService {
               language: ttsLang,
             );
             break;
-          case 'openai_tts':
-            success = await _generateAudioWithOpenAiTts(
-              narration: narration,
-              savedFile: savedFile,
-            );
-            break;
           case 'elevenlabs':
             success = await _generateAudioWithElevenLabs(
               narration: narration,
@@ -108,12 +103,17 @@ class TtsService {
           case 'fish_audio':
           case 'minimax_tts':
           case 'google_cloud_tts':
+          case 'amazon_polly':
+          case 'speechify':
+          case 'azure_speech':
             // Keyed cloud providers — default narrator voice, emotion
-            // neutral. Per-character voices go through synthesizeSpeech.
+            // detected from the line. Per-character voices go through
+            // synthesizeSpeech.
             try {
               await synthesizeSpeech(
                 narration,
                 voice: _defaultVoiceFor(providerId),
+                emotion: detectEmotion(narration),
                 outputPath: savedFile.path,
               );
               success = true;
@@ -121,6 +121,13 @@ class TtsService {
               debugPrint('$providerId failed for scene $sceneNumber: $e');
               success = false;
             }
+            break;
+          case 'openai_tts':
+            // OpenAI TTS shut down 6 Jan 2027 — refuse with a clear
+            // error instead of calling a dead API. The Flutter TTS
+            // fallback below still runs so the scene is not lost.
+            debugPrint('OpenAI TTS shut down 6 Jan 2027 — pick another TTS provider in Settings.');
+            success = false;
             break;
           case 'flutter_tts':
           default:
@@ -182,12 +189,15 @@ class TtsService {
   /// Default (narrator) voice per keyed provider. Fish Audio and MiniMax
   /// have no usable default — their voice IDs are UUIDs from the
   /// provider's own library, so the caller must set one in Settings.
+  /// Speechify has no usable default either (voice IDs are library UUIDs).
   String _defaultVoiceFor(String pid) {
     const defaults = {
       'sarvam_tts': 'Meera',
       'gemini_tts': 'Aoede',
       'deepgram': 'flux-anjali-hi',
-      'google_cloud_tts': 'hi-IN-Neural2-D',
+      'google_cloud_tts': 'hi-IN-Wavenet-A',
+      'amazon_polly': 'Aditi',
+      'azure_speech': 'hi-IN-SwaraNeural',
     };
     final voice = defaults[pid];
     if (voice == null) {
@@ -208,13 +218,15 @@ class TtsService {
   /// Synthesize one line of speech and write it to [outputPath].
   /// Used by prompt-to-video: per-character voice + emotion pace.
   /// [voice] is the provider voice id (resolved by CharacterVoiceMap).
-  /// [speed] is a pace multiplier (1.0 = normal).
+  /// [speed] is a pace multiplier (1.0 = normal). [emotion] drives
+  /// pace (Sarvam/Gemini/Google Cloud) and the Azure SwaraNeural style.
   /// Throws on missing key / placeholder voice / tiny audio — never
   /// writes silence as a voiceover.
   Future<void> synthesizeSpeech(
     String text, {
     String? voice,
     double? speed,
+    String emotion = 'neutral',
     String? providerOverride,
     required String outputPath,
   }) async {
@@ -223,6 +235,7 @@ class TtsService {
       text: text,
       voice: voice,
       speed: speed ?? 1.0,
+      emotion: emotion,
       providerId: pid,
     );
     if (bytes.length < 1000) {
@@ -239,6 +252,7 @@ class TtsService {
     required String text,
     String? voice,
     required double speed,
+    String emotion = 'neutral',
     required String providerId,
   }) async {
     final client = VoiceProviderClient();
@@ -283,11 +297,69 @@ class TtsService {
           speed: speed,
         );
       case 'google_cloud_tts':
-        return _synthesizeGoogleCloud(
+        // WaveNet default (hi-IN-Wavenet-A, female narrator). Emotion
+        // is SSML prosody only — no acted styles on WaveNet.
+        return client.synthesizeGoogleCloud(
+          apiKey: _requireKey('GOOGLE_TTS_KEY',
+              'https://console.cloud.google.com/apis/library/texttospeech.googleapis.com'),
           text: text,
-          voiceId: voice ?? 'hi-IN-Neural2-D',
-          speed: speed,
+          voiceId: voice ?? 'hi-IN-Wavenet-A',
+          emotion: emotion,
+          pace: speed,
         );
+      case 'amazon_polly':
+        // Polly needs the Secret Access Key + region from Settings
+        // (SharedPreferences — the Hive model only holds one key).
+        final pollyCreds = await ProviderCredentials.load('amazon_polly');
+        return client.synthesizePolly(
+          accessKeyId: _requireKey(
+              'AWS_ACCESS_KEY_ID', 'https://console.aws.amazon.com/polly/'),
+          secretAccessKey: pollyCreds.secret.isNotEmpty
+              ? pollyCreds.secret
+              : (throw StateError(
+                  'Amazon Polly needs an AWS Secret Access Key in Settings (IAM user with polly:SynthesizeSpeech).')),
+          text: text,
+          voiceId: voice ?? 'Aditi',
+          region: pollyCreds.region.isNotEmpty
+              ? pollyCreds.region
+              : defaultRegionFor('amazon_polly'),
+        );
+      case 'speechify':
+        // Simba 3.5 default (48 languages incl. Hindi). Simba 3.2 is
+        // English-only per Speechify docs — the model is picked in
+        // Settings; do not use 3.2 for Hindi.
+        final speechifyCreds = await ProviderCredentials.load('speechify');
+        return client.synthesizeSpeechify(
+          apiKey: _requireKey(
+              'SPEECHIFY_API_KEY', 'https://platform.speechify.ai'),
+          text: text,
+          voiceId: voice ??
+              (throw StateError(
+                  'Speechify needs a voice ID from GET /v1/voices (platform.speechify.ai) in Settings.')),
+          model: speechifyCreds.model.isNotEmpty
+              ? speechifyCreds.model
+              : 'simba-3.5',
+        );
+      case 'azure_speech':
+        // SwaraNeural is the only hi-IN voice with verified emotion
+        // styles (cheerful / empathetic / newscast) — the real
+        // emotional option. Key + region from Settings.
+        final azureCreds = await ProviderCredentials.load('azure_speech');
+        return client.synthesizeAzure(
+          apiKey: _requireKey('AZURE_SPEECH_KEY',
+              'https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices'),
+          text: text,
+          voiceId: voice ?? 'hi-IN-SwaraNeural',
+          region: azureCreds.region.isNotEmpty
+              ? azureCreds.region
+              : defaultRegionFor('azure_speech'),
+          emotion: emotion,
+        );
+      case 'openai_tts':
+        // OpenAI TTS (tts-1 / gpt-4o-mini-tts) shut down 6 Jan 2027.
+        // Refuse with a clear message instead of calling a dead API.
+        throw StateError(
+            'OpenAI TTS shut down on 6 January 2027. Pick another TTS provider in Settings (Sarvam, Gemini, Google Cloud WaveNet, Azure, Speechify, Polly or Deepgram).');
       case 'edge_tts':
         return _synthesizeEdgeBytes(
           text: text,
@@ -296,8 +368,6 @@ class TtsService {
         );
       case 'piper_tts':
         return _synthesizePiperBytes(text: text, voice: voice);
-      case 'openai_tts':
-        return _synthesizeOpenAiBytes(text: text, voice: voice);
       case 'elevenlabs':
         return _synthesizeElevenLabsBytes(text: text, voice: voice);
       case 'flutter_tts':
@@ -310,39 +380,6 @@ class TtsService {
         }
         return tmp.readAsBytes();
     }
-  }
-
-  /// Google Cloud TTS (SSML prosody: rate + pitch). Billing must be
-  /// enabled on the Google Cloud project — never the default provider.
-  Future<Uint8List> _synthesizeGoogleCloud({
-    required String text,
-    required String voiceId,
-    required double speed,
-  }) async {
-    final key = _requireKey('GOOGLE_TTS_KEY',
-        'https://console.cloud.google.com/apis/library/texttospeech.googleapis.com');
-    final clean = stripEmotionTag(text).replaceAll('&', 'and');
-    final ssml = '<speak><prosody rate="${speed.toStringAsFixed(2)}" '
-        'pitch="+0st">$clean</prosody></speak>';
-    final response = await http.post(
-      Uri.parse('https://texttospeech.googleapis.com/v1/text:synthesize?key=$key'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'input': {'ssml': ssml},
-        'voice': {'languageCode': 'hi-IN', 'name': voiceId},
-        'audioConfig': {'audioEncoding': 'MP3'},
-      }),
-    ).timeout(const Duration(seconds: 60));
-    if (response.statusCode != 200) {
-      throw StateError(
-          'Google Cloud TTS returned HTTP ${response.statusCode}: ${response.body}');
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final audioContent = data['audioContent'] as String?;
-    if (audioContent == null || audioContent.isEmpty) {
-      throw StateError('Google Cloud TTS returned no audio.');
-    }
-    return base64Decode(audioContent);
   }
 
   Future<Uint8List> _synthesizeEdgeBytes({
@@ -390,32 +427,6 @@ class TtsService {
     ).timeout(const Duration(seconds: 30));
     if (response.statusCode != 200) {
       throw StateError('Piper TTS returned HTTP ${response.statusCode}.');
-    }
-    return response.bodyBytes;
-  }
-
-  Future<Uint8List> _synthesizeOpenAiBytes({
-    required String text,
-    String? voice,
-  }) async {
-    final key = _requireKey('OPENAI_API_KEY', 'https://platform.openai.com/api-keys');
-    final url = (baseUrl != null && baseUrl!.isNotEmpty)
-        ? baseUrl!
-        : 'https://api.openai.com/v1/audio/speech';
-    final response = await http.post(
-      Uri.parse(url),
-      headers: {
-        'Authorization': 'Bearer $key',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'model': modelId ?? 'tts-1',
-        'input': text,
-        'voice': voice ?? 'alloy',
-      }),
-    ).timeout(const Duration(seconds: 30));
-    if (response.statusCode != 200) {
-      throw StateError('OpenAI TTS returned HTTP ${response.statusCode}.');
     }
     return response.bodyBytes;
   }
@@ -517,40 +528,6 @@ class TtsService {
       }
     } catch (e) {
       debugPrint('Piper TTS Error: $e');
-    }
-    return false;
-  }
-
-  Future<bool> _generateAudioWithOpenAiTts({
-    required String narration,
-    required File savedFile,
-  }) async {
-    try {
-      if (apiKey == null || apiKey!.isEmpty) return false;
-      
-      final url = (baseUrl != null && baseUrl!.isNotEmpty) 
-          ? baseUrl! 
-          : 'https://api.openai.com/v1/audio/speech';
-          
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': modelId ?? 'tts-1',
-          'input': narration,
-          'voice': 'alloy',
-        }),
-      ).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        await savedFile.writeAsBytes(response.bodyBytes);
-        return true;
-      }
-    } catch (e) {
-      debugPrint('OpenAI TTS Error: $e');
     }
     return false;
   }

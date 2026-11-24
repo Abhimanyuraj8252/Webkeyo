@@ -5,7 +5,9 @@ import '../../../core/constants.dart';
 import '../../../core/theme.dart';
 import '../../../models/ai_provider_model.dart';
 import '../../../services/dynamic_api_client.dart';
+import '../../../services/provider_credentials.dart';
 import '../../../services/provider_registry.dart';
+import '../../../services/voice_providers.dart';
 
 class ProviderTile extends StatefulWidget {
   final AIProviderModel provider;
@@ -21,6 +23,9 @@ class _ProviderTileState extends State<ProviderTile> {
   bool _isLoading = false;
   late TextEditingController _apiKeyController;
   late TextEditingController _baseUrlController;
+  late TextEditingController _secretController;
+  late TextEditingController _regionController;
+  String? _modelChoice;
   Timer? _debounce;
 
   @override
@@ -28,6 +33,30 @@ class _ProviderTileState extends State<ProviderTile> {
     super.initState();
     _apiKeyController = TextEditingController(text: widget.provider.apiKey);
     _baseUrlController = TextEditingController(text: widget.provider.customBaseUrl);
+    _secretController = TextEditingController();
+    _regionController = TextEditingController();
+    _loadExtra();
+  }
+
+  Future<void> _loadExtra() async {
+    final extra = await ProviderCredentials.load(widget.provider.id);
+    if (!mounted) return;
+    setState(() {
+      _secretController.text = extra.secret;
+      _regionController.text = extra.region;
+      _modelChoice = extra.model.isNotEmpty ? extra.model : null;
+    });
+  }
+
+  Future<void> _saveExtra() async {
+    await ProviderCredentials.save(
+      widget.provider.id,
+      ProviderExtra(
+        secret: _secretController.text,
+        region: _regionController.text,
+        model: _modelChoice ?? '',
+      ),
+    );
   }
 
   @override
@@ -35,6 +64,8 @@ class _ProviderTileState extends State<ProviderTile> {
     _debounce?.cancel();
     _apiKeyController.dispose();
     _baseUrlController.dispose();
+    _secretController.dispose();
+    _regionController.dispose();
     super.dispose();
   }
 
@@ -72,14 +103,15 @@ class _ProviderTileState extends State<ProviderTile> {
     try {
       final updatedProvider = registry.providers.firstWhere((p) => p.id == widget.provider.id);
       
-      // Specifically skip Edge-TTS and Piper TTS since they don't have standard API endpoints
-      if (updatedProvider.id == 'edge_tts' || updatedProvider.id == 'piper_tts') {
-         messenger.showSnackBar(
-          const SnackBar(content: Text('Offline/Built-in TTS providers do not need manual fetching.')),
+      // TTS providers have no /models endpoint — "Fetch Models" would
+      // just fail. Vision/LLM providers keep the button.
+      if (updatedProvider.category == ProviderCategory.tts) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('TTS providers do not have a model list to fetch — paste the voice ID in Settings instead.')),
         );
         return;
       }
-      
+
       final models = await DynamicApiClient.fetchModels(updatedProvider);
       await registry.saveModelsForProvider(updatedProvider.id, models);
 
@@ -182,6 +214,101 @@ class _ProviderTileState extends State<ProviderTile> {
                     ),
                     const SizedBox(height: AppConstants.paddingMedium),
                   ],
+                  // Extra credentials this provider needs (Polly secret +
+                  // region, Azure region, Speechify model). Shown only
+                  // when the provider declares them.
+                  Builder(
+                    builder: (context) {
+                      final fields = providerExtraFields[widget.provider.id];
+                      if (fields == null) return const SizedBox.shrink();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (fields.needsSecret) ...[
+                            TextFormField(
+                              controller: _secretController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Secret Access Key',
+                                helperText: 'AWS Secret Access Key (IAM user with polly:SynthesizeSpeech)',
+                                prefixIcon: Icon(Icons.lock),
+                              ),
+                              onChanged: (_) => _saveExtra(),
+                            ),
+                            const SizedBox(height: AppConstants.paddingMedium),
+                          ],
+                          if (fields.needsRegion) ...[
+                            TextFormField(
+                              controller: _regionController,
+                              decoration: InputDecoration(
+                                labelText: 'Region',
+                                hintText: 'Default: ${defaultRegionFor(widget.provider.id)}',
+                                prefixIcon: const Icon(Icons.public),
+                              ),
+                              onChanged: (_) => _saveExtra(),
+                            ),
+                            const SizedBox(height: AppConstants.paddingMedium),
+                          ],
+                          if (fields.modelChoices.isNotEmpty) ...[
+                            DropdownButtonFormField<String>(
+                              initialValue: _modelChoice ?? fields.modelChoices.first,
+                              decoration: const InputDecoration(
+                                labelText: 'Model',
+                                prefixIcon: Icon(Icons.tune),
+                              ),
+                              items: fields.modelChoices
+                                  .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                                  .toList(),
+                              onChanged: (value) {
+                                setState(() => _modelChoice = value);
+                                _saveExtra();
+                              },
+                            ),
+                            const SizedBox(height: AppConstants.paddingSmall),
+                            const Text(
+                              'Simba 3.5 speaks 48 languages incl. Hindi. Simba 3.2 is English-only — use 3.5 for Hindi.',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                            const SizedBox(height: AppConstants.paddingMedium),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                  // Verified free tier + cost (official pricing pages,
+                  // 24 Nov 2026). Shown for providers that have one.
+                  Builder(
+                    builder: (context) {
+                      final info = voiceProviderInfos
+                          .where((i) => i.id == widget.provider.id)
+                          .firstOrNull;
+                      if (info == null) return const SizedBox.shrink();
+                      return Container(
+                        padding: const EdgeInsets.all(AppConstants.paddingSmall),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(AppConstants.radiusSmall),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Cost: ${info.cost}',
+                                style: theme.textTheme.bodySmall),
+                            const SizedBox(height: 4),
+                            Text('Free tier: ${info.freeLimit}',
+                                style: theme.textTheme.bodySmall),
+                            if (info.keyUrl.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('Get a key: ${info.keyUrl}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.primary)),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: AppConstants.paddingMedium),
                   ElevatedButton.icon(
                     onPressed: _isLoading ? null : _fetchModels,
                     icon: _isLoading 

@@ -268,32 +268,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: AppConstants.paddingMedium),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _voiceOptions.length,
-              itemBuilder: (context, index) {
-                final option = _voiceOptions[index];
-                final selected = option.id == _voiceId;
-                return Card(
-                  color: selected
-                      ? theme.colorScheme.primaryContainer
-                      : null,
-                  child: ListTile(
-                    leading: Icon(
-                      selected
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_unchecked,
-                    ),
-                    title: Text(option.name),
-                    subtitle: Text(
-                      option.freeLimit +
-                          (option.needsKey ? ' — needs a free key in Settings' : ''),
-                    ),
-                    onTap: () => _pickVoice(option.id),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _voiceOptions.length,
+            itemBuilder: (context, index) {
+              final option = _voiceOptions[index];
+              final selected = option.id == _voiceId;
+              return Card(
+                color: selected
+                    ? theme.colorScheme.primaryContainer
+                    : null,
+                child: ListTile(
+                  leading: Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
                   ),
-                );
-              },
-            ),
+                  title: Text(option.name),
+                  subtitle: Text(
+                    option.freeLimit +
+                        (option.needsKey ? ' — needs a free key in Settings' : ''),
+                  ),
+                  onTap: () => _pickVoice(option.id),
+                ),
+              );
+            },
           ),
         ],
       ),

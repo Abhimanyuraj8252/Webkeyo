@@ -209,7 +209,7 @@ class EngagementService {
   /// ignored). An exact clock time needs the `timezone` package and a
   /// `zonedSchedule` call — TODO if the user asks for a fixed time.
   Future<void> scheduleDailyReminder({int hour = 19, int minute = 0}) async {
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('@mipmap/launcher_icon');
     const settings = InitializationSettings(android: android);
     await _notifications.initialize(settings: settings);
     await _notifications.periodicallyShow(

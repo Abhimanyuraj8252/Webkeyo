@@ -1,3 +1,5 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
@@ -39,6 +41,13 @@ class ThemeNotifier extends ChangeNotifier {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // An uncaught async error (e.g. a permission request that throws on
+  // some devices) must never kill the app on open: swallow it here so
+  // the app stays alive on its error screen instead of closing.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Uncaught async error: $error');
+    return true;
+  };
   // Sentry crash reporting (free tier) is OFF unless a DSN is passed
   // at build time: flutter build apk --dart-define=SENTRY_DSN=https://...
   // No DSN is ever hardcoded. The app works fully without it.
@@ -232,20 +241,26 @@ class _GlobalMediaAppState extends State<GlobalMediaApp> {
   }
 
   Future<void> _requestPermissions() async {
-    // Request storage permissions on Android
-    if (await Permission.storage.isDenied) {
-      await Permission.storage.request();
+    // Fire-and-forget at startup: a permission call that throws on a
+    // particular device/OS version must never take the app down.
+    try {
+      // Request storage permissions on Android
+      if (await Permission.storage.isDenied) {
+        await Permission.storage.request();
+      }
+      // Android 11+ needs MANAGE_EXTERNAL_STORAGE for public directory writes
+      if (await Permission.manageExternalStorage.isDenied) {
+        await Permission.manageExternalStorage.request();
+      }
+      // Android 13+ granular media permissions
+      await [
+        Permission.photos,
+        Permission.videos,
+        Permission.audio,
+      ].request();
+    } catch (e) {
+      debugPrint('Permission request failed (ignored): $e');
     }
-    // Android 11+ needs MANAGE_EXTERNAL_STORAGE for public directory writes
-    if (await Permission.manageExternalStorage.isDenied) {
-      await Permission.manageExternalStorage.request();
-    }
-    // Android 13+ granular media permissions
-    await [
-      Permission.photos,
-      Permission.videos,
-      Permission.audio,
-    ].request();
   }
 
   @override

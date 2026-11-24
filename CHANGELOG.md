@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-25
+
+### Fixed
+- Crash on open (first run): the onboarding voice-picker page used `Expanded` inside a scroll view, which throws a layout error as soon as the app opens. The page now lays out correctly.
+- Startup hardening: permission requests at launch are now guarded so a device-specific failure can't close the app; an uncaught async error no longer kills the app — it stays on its error screen instead.
+- Daily-reminder notification icon fixed (`@mipmap/launcher_icon`, the app's real icon).
+- Regression tests: onboarding page builds clean, and a boot failure shows the "could not start" screen with Retry.
+
 ## [1.2.0] - 2026-11-24
 
 ### Added

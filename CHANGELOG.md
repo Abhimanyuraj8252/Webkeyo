@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-25
+
+### Added
+- Unlimited-duration prompt-to-video: pick any length — presets from 1 minute to 2 hours, or type any custom minutes (90, 180, 2h, …) with no upper cap. Scenes, script, narration, SFX, subtitles and karaoke all scale to the full requested duration; the plan card shows the planned length, scene and chapter counts, and an honest estimated render time before starting.
+- Style picker with code-drawn previews: every one of the 10 styles shows a small preview image rendered in-app by the same motion-graphics engine, so what you see is what the video will look like. No network, no stock images.
+- Purpose picker (Reel, Story, Lecture, Education, Information, Motivation): each purpose pre-configures pacing, narration tone, music mood and the karaoke default, and says plainly what it is best for.
+- Character-design picker: anime, 3D-style and silhouette characters, all drawn in code and animated into every frame (or no character, the classic look).
+- PDF lecture import: pick a lecture PDF and the app reads its pages and text, cuts one scene per page (long pages split further), generates the narration audio and matches audio to scenes automatically — audio, scene and captions stay in sync. Pages without a usable image fall back to a code-drawn scene.
+- Scene-by-scene editor: trim a scene, reorder scenes (drag), change a scene's transition (cut/fade/zoom/slide), adjust a scene's timing, or edit its narration — audio, scene and captions re-sync automatically, then re-render with the edited scenes.
+- Crash-free long renders: every long operation has per-step timeouts (90s per TTS line, 180s per FFmpeg step) and a Cancel button; a hung provider or a cancelled render shows a clear message with Retry instead of freezing or closing the app. The final mux now stream-copies instead of re-encoding, so a 2-hour video finishes in seconds instead of an hour.
+- Regression tests for the new prompt-video flows (open the screen, pick style/purpose/character/duration, edit scenes and save), PDF-to-scenes planning, audio-scene sync math, and editor reorder/trim logic.
+
+### Fixed
+- Duration math: generated scenes used to round `est_seconds` to 1 decimal, making every scene 0.06s too long — a 2-hour video overshot by 54 seconds. Scenes now land on the requested duration.
+- SFX loop decision now uses the requested length, so a video of exactly 2 minutes gets one 120s bed instead of looping on a float rounding artifact.
+
 ## [1.2.1] - 2026-11-25
 
 ### Fixed

@@ -225,6 +225,150 @@ Map<String, dynamic> generateScript(String idea, String genre) {
   };
 }
 
+/// Script scaled to a requested duration — the unlimited-duration path.
+///
+/// [generateScript] always returns the 8-scene base story (~1 minute).
+/// This one repeats the story arc in chapters until the video covers
+/// [targetSeconds]: the hook first, then the genre beats cycled, one
+/// bridge line after each full beat cycle, and a chapter-heading scene
+/// every ~12 scenes, with the cliffhanger always last.
+///
+/// Every generated scene is timed to [sceneSeconds] of rendered video
+/// (est_seconds = sceneSeconds / 1.3, since the render stretches by
+/// 1.3x), so the finished video lands on the requested duration.
+/// Returns the same map shape as [generateScript], plus
+/// 'target_seconds', 'chapters' and 'scene_seconds'.
+///
+/// Honest limit: a one-line prompt cannot invent hours of *new* story.
+/// Long videos retell the arc in chapters — the plan card on the
+/// prompt-video screen says so. For a genuinely new 2-hour story the
+/// user pastes a longer prompt (or uses the Claude rewrite path).
+Map<String, dynamic> generateScriptForDuration(
+  String idea,
+  String genre,
+  double targetSeconds, {
+  double sceneSeconds = 8.0,
+  String tone = 'dramatic',
+}) {
+  final base = generateScript(idea, genre);
+  final baseScenes = base['scenes'] as List<Map<String, dynamic>>;
+  final baseTotal = baseScenes.fold<double>(
+    0,
+    (sum, s) => sum + ((s['est_seconds'] as num?)?.toDouble() ?? 6.0) * 1.3,
+  );
+  // Short request — the base story already covers it. No padding.
+  if (targetSeconds <= baseTotal) {
+    return {
+      ...base,
+      'target_seconds': targetSeconds,
+      'chapters': 1,
+      'scene_seconds': sceneSeconds,
+    };
+  }
+
+  final key = genre.trim().toLowerCase();
+  final spec = genres[key]!;
+  const places = {
+    'haunted': 'haunted inn',
+    'love': 'old railway station',
+    'action': 'burning city',
+    'sad': 'empty railway platform',
+    'motivational': 'small rented room',
+    'mystery': 'dark apartment',
+  };
+  const villains = {
+    'action': 'demon king',
+    'haunted': 'shadow',
+    'mystery': 'stranger',
+    'love': 'fate',
+    'sad': 'time',
+    'motivational': 'doubt',
+  };
+  const hero = 'Arjun';
+  const other = 'Titli';
+  final place = places[key] ?? 'old house';
+  final villain = villains[key] ?? 'enemy';
+
+  // Bridge lines between chapters — narrator, calm, genre-agnostic.
+  const bridges = [
+    'Aur phir, kahani ne ek naya mod liya.',
+    'Lekin ye to bas shuruaat thi — asli kahani abhi baaki thi.',
+    'Raat abhi baaki thi, aur kahani bhi.',
+    'Tabhi, kuch aisa hua jiski kisi ko ummeed nahi thi.',
+    'Aur phir, sab kuch badal gaya.',
+  ];
+
+  // How many scenes the video needs (each renders sceneSeconds long).
+  final needed = (targetSeconds / sceneSeconds).ceil().clamp(8, 1 << 20);
+  final est = sceneSeconds / 1.3;
+
+  Map<String, dynamic> scene(
+    int number,
+    String speaker,
+    String narration,
+    String emotion,
+  ) =>
+      {
+        'scene_number': number,
+        'speaker': speaker,
+        'narration': narration,
+        'emotion': emotion,
+        // Full precision on purpose: est is sceneSeconds / 1.3, and the
+        // render stretches it back by 1.3x. Rounding to 1 decimal here
+        // (6.2 instead of 6.1538) made every scene 0.06s too long — a
+        // 2-hour video overshot by 54 seconds.
+        'est_seconds': est,
+      };
+
+  final scenes = <Map<String, dynamic>>[];
+  // Scene 1 — the hook, always the user's idea.
+  scenes.add(scene(1, 'Narrator',
+      '${idea.trim().replaceAll(RegExp(r'[.!?]+$'), '')}.', 'dramatic'));
+  var number = 2;
+  var chapter = 1;
+  var beatIndex = 0;
+  var bridgeIndex = 0;
+  // Fill up to needed - 1 scenes; the last one is always the cliffhanger.
+  while (scenes.length < needed - 1) {
+    // Chapter heading every 12 scenes (never right after the hook).
+    if (scenes.length > 1 && scenes.length % 12 == 0) {
+      chapter++;
+      scenes.add(scene(number++, 'Narrator',
+          'Chapter $chapter — kahani aage badhti hai.', tone));
+      continue;
+    }
+    final (speaker, emotion, template) =
+        spec.beats[beatIndex % spec.beats.length];
+    final text = _fill(template, hero, other, place, villain);
+    scenes.add(scene(
+      number++,
+      speaker
+          .replaceAll('{hero}', hero)
+          .replaceAll('{other}', other)
+          .replaceAll('{villain}', 'Villain'),
+      text,
+      emotion,
+    ));
+    beatIndex++;
+    // One bridge line after each full beat cycle.
+    if (beatIndex % spec.beats.length == 0 && scenes.length < needed - 1) {
+      scenes.add(scene(number++, 'Narrator',
+          bridges[bridgeIndex % bridges.length], 'calm'));
+      bridgeIndex++;
+    }
+  }
+  final cliffhanger = _fill(spec.cliffhanger, hero, other, place, villain);
+  scenes.add(scene(number, 'Narrator', cliffhanger, 'dramatic'));
+
+  return {
+    ...base,
+    'scenes': scenes,
+    'target_seconds': targetSeconds,
+    'chapters': chapter,
+    'scene_seconds': sceneSeconds,
+  };
+}
+
 /// Claude prompt templates — the premium path, documented so the user can
 /// also paste them into Claude directly. Same instructions the Claude
 /// rewrite sends.

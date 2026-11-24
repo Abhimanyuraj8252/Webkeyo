@@ -41,6 +41,8 @@ class TemplatesRow extends StatelessWidget {
                           builder: (_) => PromptVideoScreen(
                             initialPrompt: template.prompt,
                             initialStyle: template.styleId,
+                            initialDurationSeconds:
+                                template.durationSeconds.toDouble(),
                           ),
                         ),
                       );

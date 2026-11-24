@@ -90,15 +90,22 @@ Future<String> generateSfx({
 
 /// FFmpeg filter that mixes [narrationPath] with [sfxPath] underneath it
 /// at [sfxVolumeDb] (default -18 dB). Pure function — unit-tested.
+///
+/// [loopSfx]: when true, the SFX bed is looped forever under the
+/// narration (`-stream_loop -1`) instead of playing once. Long videos
+/// (over ~2 minutes) generate only a short SFX loop and repeat it —
+/// a 2-hour SFX file would otherwise be a ~300 MB WAV on the phone.
 String buildMixCommand({
   required String narrationPath,
   required String sfxPath,
   required String outPath,
   double sfxVolumeDb = -18.0,
+  bool loopSfx = false,
 }) {
   // dB -> linear gain: 10^(dB/20). -18 dB ≈ 0.126.
   final gain = math.pow(10, sfxVolumeDb / 20.0).toStringAsFixed(4);
-  return '-i "$narrationPath" -i "$sfxPath" -filter_complex '
+  final sfxInput = loopSfx ? '-stream_loop -1 -i "$sfxPath"' : '-i "$sfxPath"';
+  return '-i "$narrationPath" $sfxInput -filter_complex '
       '"[0:a]volume=1.0[a0];[1:a]volume=$gain[a1];'
       '[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]" '
       '-map "[aout]" -c:a aac -b:a 128k -y "$outPath"';

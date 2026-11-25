@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,16 +15,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.50.1'
           channel: 'stable'
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Set up release signing keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/android/app/release.keystore"
@@ -34,13 +32,17 @@ jobs:
           storeFile=$GITHUB_WORKSPACE/android/app/release.keystore
           EOF
           ls -l "$GITHUB_WORKSPACE/android/app/release.keystore" "$GITHUB_WORKSPACE/android/key.properties"
-
+          echo "--- keystore sha256 (expect 370a852c74954cf8c49702ab22f223ff3b14f4d2f43723fe40f1f8a795265b2a) ---"
+          sha256sum "$GITHUB_WORKSPACE/android/app/release.keystore"
+          echo "--- key.properties (passwords masked) ---"
+          sed -E 's/(Password=).*/\1***/' "$GITHUB_WORKSPACE/android/key.properties" | cat -A
+          echo "--- keystore entries ---"
+          keytool -list -keystore "$GITHUB_WORKSPACE/android/app/release.keystore" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" || "$JAVA_HOME/bin/keytool" -list -keystore "$GITHUB_WORKSPACE/android/app/release.keystore" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" || echo "KEYTOOL LIST FAILED"
       - name: Build split APKs
         run: flutter build apk --split-per-abi --release
-
       - name: Upload APKs to the draft release and publish it
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
         run: |
           TAG="${GITHUB_REF_NAME}"
           ls -l build/app/outputs/flutter-apk/

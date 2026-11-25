@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-25
+
+### Fixed
+- Release signing: every release from v1.2.3 on is signed with one stable release keystore, so updates install over the old version normally. (v1.2.0–v1.2.2 were each signed with a different fresh debug key, so Android refused to install them over the old version — the old crashing build stayed on the phone.) No app-code change in this release; install it once after uninstalling the old version, and future updates will work without uninstalling.
+
 ## [1.2.2] - 2026-11-25
 
 ### Added
